@@ -93,13 +93,24 @@ antiga carregada em memória e avisa "unit file ... changed on disk".
 
 ## Rodando em modo desenvolvimento (hot reload)
 
+### Em primeiro plano (Foreground)
 ```bash
 ./dev.sh
 ```
 
 Sobe o backend com `--reload` na 8811 e o Vite dev server na 5173 (com proxy
 de `/api` para o backend). Abra **http://127.0.0.1:5173** — mudanças no React
-aparecem na hora.
+e no Python aparecem na hora.
+
+### Em segundo plano (Background com Hot Reload)
+```bash
+./dev-bg.sh
+```
+
+Sobe os servidores em segundo plano com Hot Reload ativado.
+- Abra **http://127.0.0.1:5173**
+- Acompanhar logs em tempo real: `tail -f dev.log`
+- Encerrar o servidor: `./stop.sh`
 
 ## Notificações do navegador mostrando IP em vez do nome
 
