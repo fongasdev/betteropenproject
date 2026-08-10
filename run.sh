@@ -3,8 +3,9 @@
 set -e
 cd "$(dirname "$0")"
 
-if [ ! -d .venv ]; then
+if [ ! -d .venv ] || [ ! -f .venv/bin/uvicorn ]; then
   python3 -m venv .venv
+  [ -f .venv/bin/pip ] || (curl -sSL https://bootstrap.pypa.io/get-pip.py | .venv/bin/python)
   .venv/bin/pip install -q -r requirements.txt
 fi
 
