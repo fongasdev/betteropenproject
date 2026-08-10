@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .venv/
+
+### Node
+frontend-react/node_modules
