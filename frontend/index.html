@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<title>Minhas Tasks - OpenProject</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --card: #1f232c;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --muted: #8a8f98;
+    --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header label { font-size: 13px; color: var(--muted); margin-right: 8px; }
+  #board {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    overflow-x: auto;
+    align-items: flex-start;
+  }
+  .column {
+    background: var(--panel);
+    border-radius: 10px;
+    min-width: 280px;
+    max-width: 280px;
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 90px);
+  }
+  .column-header {
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+  }
+  .column-header .count { color: var(--muted); font-weight: 400; }
+  .cards {
+    padding: 8px;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 60px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    cursor: grab;
+    font-size: 13px;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .id { color: var(--muted); font-size: 11px; }
+  .card .subject { margin: 4px 0; font-weight: 500; }
+  .card .meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .card .dates { margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .sortable-ghost { opacity: 0.4; }
+
+  #modal-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  #modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: 480px;
+    max-width: 92vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 18px;
+  }
+  #modal h2 { margin-top: 0; font-size: 16px; }
+  #modal label { display: block; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  #modal input[type=date], #modal textarea {
+    width: 100%;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    font-family: inherit;
+  }
+  #modal textarea { min-height: 60px; resize: vertical; }
+  #modal button {
+    background: var(--accent);
+    border: none;
+    color: white;
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 8px;
+    font-size: 13px;
+  }
+  #modal .close { position: absolute; top: 14px; right: 18px; cursor: pointer; color: var(--muted); }
+  #modal-inner { position: relative; }
+  .activity { border-top: 1px solid var(--border); padding: 8px 0; font-size: 12px; }
+  .activity .who { color: var(--accent); font-weight: 600; }
+  .activity .when { color: var(--muted); float: right; }
+  #toast {
+    position: fixed; bottom: 16px; right: 16px;
+    background: var(--card); border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 8px; font-size: 13px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📋 Minhas Tasks — OpenProject</h1>
+  <div>
+    <label><input type="checkbox" id="onlyMe" checked /> só as minhas</label>
+    <button id="reload" style="background:var(--accent);border:none;color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;">Recarregar</button>
+  </div>
+</header>
+
+<div id="board"></div>
+
+<div id="modal-backdrop">
+  <div id="modal">
+    <div id="modal-inner"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = "/api";
+let wps = [];
+let statuses = [];
+
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  setTimeout(() => t.style.display = "none", 2500);
+}
+
+async function apiGet(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) { toast("Erro: " + r.status); throw new Error(await r.text()); }
+  return r.json();
+}
+async function apiPatch(path, body) {
+  const r = await fetch(API + path, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (!r.ok) {
+    let msg = "Erro " + r.status;
+    try { const j = await r.json(); msg = j.detail || msg; } catch (e) {}
+    toast(msg);
+    throw new Error(msg);
+  }
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(API + path, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (!r.ok) { toast("Erro: " + r.status); throw new Error(await r.text()); }
+  return r.json();
+}
+
+async function loadAll() {
+  const onlyMe = document.getElementById("onlyMe").checked;
+  [statuses, wps] = await Promise.all([
+    apiGet("/statuses"),
+    apiGet("/work_packages?only_me=" + onlyMe),
+  ]);
+  renderBoard();
+}
+
+function renderBoard() {
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  // Colunas = status que efetivamente aparecem nas tasks carregadas (mantendo ordem geral de statuses)
+  const usedNames = new Set(wps.map(w => w.status));
+  const orderedStatuses = statuses.filter(s => usedNames.has(s.name));
+  // fallback: se algum status não bateu (raro), inclui únicos extras
+  usedNames.forEach(name => {
+    if (!orderedStatuses.find(s => s.name === name)) orderedStatuses.push({id: null, name});
+  });
+
+  orderedStatuses.forEach(status => {
+    const col = document.createElement("div");
+    col.className = "column";
+    col.dataset.statusId = status.id;
+    col.dataset.statusName = status.name;
+
+    const items = wps.filter(w => w.status === status.name);
+    col.innerHTML = `
+      <div class="column-header"><span>${status.name}</span><span class="count">${items.length}</span></div>
+      <div class="cards" data-status-name="${status.name}"></div>
+    `;
+    const cardsEl = col.querySelector(".cards");
+    items.forEach(wp => cardsEl.appendChild(renderCard(wp)));
+    board.appendChild(col);
+
+    Sortable.create(cardsEl, {
+      group: "board",
+      animation: 150,
+      onAdd: async (evt) => {
+        const wpId = parseInt(evt.item.dataset.id);
+        const wp = wps.find(w => w.id === wpId);
+        const targetStatusName = evt.to.dataset.statusName;
+        const targetStatus = statuses.find(s => s.name === targetStatusName);
+        if (!targetStatus) { toast("Status inválido"); await loadAll(); return; }
+        try {
+          const allowed = await apiGet(`/work_packages/${wpId}/available_statuses?lock_version=${wp.lockVersion}`);
+          if (!allowed.find(s => s.id === targetStatus.id)) {
+            const names = allowed.map(s => s.name).join(", ") || "nenhuma";
+            toast(`Workflow não permite "${wp.status}" → "${targetStatus.name}". Permitidos: ${names}`);
+            await loadAll();
+            return;
+          }
+          const updated = await apiPatch(`/work_packages/${wpId}/status`, {
+            lockVersion: wp.lockVersion,
+            statusId: targetStatus.id,
+          });
+          wp.status = targetStatus.name;
+          wp.lockVersion = updated.lockVersion;
+          toast(`#${wpId} movido para "${targetStatus.name}"`);
+        } catch (e) {
+          await loadAll();
+        }
+      },
+    });
+  });
+}
+
+function renderCard(wp) {
+  const div = document.createElement("div");
+  div.className = "card";
+  div.dataset.id = wp.id;
+  div.innerHTML = `
+    <div class="id">#${wp.id} · ${wp.type || ""} · ${wp.project || ""}</div>
+    <div class="subject">${wp.subject}</div>
+    <div class="meta"><span>${wp.assignee || "sem responsável"}</span><span>${wp.priority || ""}</span></div>
+    <div class="dates">
+      ${wp.startDate ? "início " + wp.startDate : ""} ${wp.dueDate ? " · prazo " + wp.dueDate : ""}
+    </div>
+  `;
+  div.addEventListener("click", () => openModal(wp.id));
+  return div;
+}
+
+async function openModal(wpId) {
+  const wp = wps.find(w => w.id === wpId);
+  const backdrop = document.getElementById("modal-backdrop");
+  const inner = document.getElementById("modal-inner");
+  inner.innerHTML = `
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>#${wp.id} — ${wp.subject}</h2>
+    <div style="color:var(--muted);font-size:12px;">${wp.project} · ${wp.type} · status atual: ${wp.status}</div>
+
+    <label>Data de início</label>
+    <input type="date" id="f-start" value="${wp.startDate || ""}" />
+    <label>Prazo (due date)</label>
+    <input type="date" id="f-due" value="${wp.dueDate || ""}" />
+    <button id="save-dates">Salvar datas</button>
+
+    <label style="margin-top:16px;">Nova anotação / comentário</label>
+    <textarea id="f-comment" placeholder="Escreva um comentário..."></textarea>
+    <button id="save-comment">Adicionar comentário</button>
+
+    <h3 style="margin-top:18px;font-size:13px;color:var(--muted);">Histórico</h3>
+    <div id="activities">Carregando...</div>
+  `;
+  backdrop.style.display = "flex";
+
+  document.getElementById("save-dates").onclick = async () => {
+    const startDate = document.getElementById("f-start").value || null;
+    const dueDate = document.getElementById("f-due").value || null;
+    try {
+      const updated = await apiPatch(`/work_packages/${wp.id}/dates`, {
+        lockVersion: wp.lockVersion, startDate, dueDate,
+      });
+      wp.lockVersion = updated.lockVersion;
+      wp.startDate = startDate; wp.dueDate = dueDate;
+      toast("Datas atualizadas");
+      renderBoard();
+    } catch (e) { /* toast já disparado */ }
+  };
+
+  document.getElementById("save-comment").onclick = async () => {
+    const text = document.getElementById("f-comment").value.trim();
+    if (!text) return;
+    await apiPost(`/work_packages/${wp.id}/comments`, { comment: text });
+    document.getElementById("f-comment").value = "";
+    toast("Comentário adicionado");
+    loadActivities(wp.id);
+  };
+
+  loadActivities(wp.id);
+}
+
+async function loadActivities(wpId) {
+  const el = document.getElementById("activities");
+  const acts = await apiGet(`/work_packages/${wpId}/activities`);
+  const withComment = acts.filter(a => a.comment);
+  if (!withComment.length) { el.innerHTML = "<div style='color:var(--muted);font-size:12px;'>Sem comentários ainda.</div>"; return; }
+  el.innerHTML = withComment.map(a => `
+    <div class="activity">
+      <span class="who">${a.user || "?"}</span>
+      <span class="when">${a.createdAt ? new Date(a.createdAt).toLocaleString() : ""}</span>
+      <div>${a.comment}</div>
+    </div>
+  `).join("");
+}
+
+function closeModal() {
+  document.getElementById("modal-backdrop").style.display = "none";
+}
+document.getElementById("modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "modal-backdrop") closeModal();
+});
+
+document.getElementById("reload").onclick = loadAll;
+document.getElementById("onlyMe").onchange = loadAll;
+
+loadAll();
+</script>
+</body>
+</html>
