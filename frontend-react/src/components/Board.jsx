@@ -18,8 +18,11 @@ export default function Board({ statuses, workPackages, onOpenCard, onMove, ping
   );
 
   const columns = useMemo(() => {
+    // Mostra sempre todos os status conhecidos (mesmo sem tasks) para servir
+    // de alvo de drag-and-drop. Status de tasks que não estão na lista
+    // oficial (ex.: workflow customizado) também entram, no fim.
     const used = new Set(workPackages.map((w) => w.status));
-    const ordered = statuses.filter((s) => used.has(s.name));
+    const ordered = [...statuses];
     used.forEach((name) => {
       if (!ordered.find((s) => s.name === name)) ordered.push({ id: null, name });
     });

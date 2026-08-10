@@ -48,6 +48,49 @@ build. Depois abra **http://127.0.0.1:8811**.
 
 Para forçar rebuild do frontend: `./run.sh --build`.
 
+## Rodando em background (systemd)
+
+`./run.sh` roda em foreground — fecha o terminal, o processo morre. Pra
+manter rodando em background, sobrevivendo a reboot e reiniciando sozinho se
+cair, use um serviço systemd.
+
+Crie `/etc/systemd/system/openassistent.service`:
+
+```ini
+[Unit]
+Description=OpenAssistent
+After=network.target
+
+[Service]
+WorkingDirectory=/home/operador/openassistent
+ExecStart=/home/operador/openassistent/run.sh
+Restart=on-failure
+User=operador
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Ative:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now openassistent
+```
+
+Comandos do dia a dia:
+
+```bash
+sudo systemctl status openassistent    # ver status
+sudo systemctl restart openassistent   # reiniciar (ex.: após deploy)
+sudo systemctl stop openassistent      # parar
+journalctl -u openassistent -f         # logs em tempo real
+```
+
+Sempre que o arquivo `.service` for alterado, rode `sudo systemctl
+daemon-reload` antes do `restart` — senão o systemd continua usando a versão
+antiga carregada em memória e avisa "unit file ... changed on disk".
+
 ## Rodando em modo desenvolvimento (hot reload)
 
 ```bash

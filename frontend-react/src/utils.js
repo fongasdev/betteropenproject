@@ -35,6 +35,29 @@ export function isOverdue(dueDate) {
   return new Date(dueDate + "T00:00:00") < today;
 }
 
+/** Pede permissão de notificação do navegador (ignora se já concedida/negada ou API ausente). */
+export function requestNotificationPermission() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}
+
+/** Dispara uma notificação nativa do navegador, se permitida. */
+export function showBrowserNotification(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(title, { body, icon: "/vite.svg", tag: `op-${Date.now()}` });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch (e) {
+    /* ambiente sem suporte (ex.: iframe) — ignora */
+  }
+}
+
 let sharedAudioCtx = null;
 
 /** Toca um "ding" curto de duas notas via Web Audio API (sem depender de arquivo de áudio). */

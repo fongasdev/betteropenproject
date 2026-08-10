@@ -5,7 +5,7 @@ import ThemeToggle from "./components/ThemeToggle.jsx";
 import Toaster from "./components/Toaster.jsx";
 import ProjectFilter from "./components/ProjectFilter.jsx";
 import { api } from "./api.js";
-import { initials } from "./utils.js";
+import { initials, requestNotificationPermission, showBrowserNotification } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
 
 let toastSeq = 0;
@@ -66,6 +66,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("op-sound", soundOn ? "on" : "off");
+    if (soundOn) requestNotificationPermission();
   }, [soundOn]);
 
   const projectNames = useMemo(() => {
@@ -86,12 +87,17 @@ export default function App() {
       events.forEach((ev) => {
         ids.add(ev.wp.id);
         const who = ev.activity?.user || "alguém";
+        let message = null;
         if (ev.type === "status") {
-          notify(`#${ev.wp.id} "${ev.wp.subject}" — ${who} mudou o status para "${ev.wp.status}"`, "info");
+          message = `#${ev.wp.id} "${ev.wp.subject}" — ${who} mudou o status para "${ev.wp.status}"`;
         } else if (ev.type === "comment") {
-          notify(`#${ev.wp.id} "${ev.wp.subject}" — novo comentário de ${who}`, "info");
+          message = `#${ev.wp.id} "${ev.wp.subject}" — novo comentário de ${who}`;
         } else if (ev.type === "assigned") {
-          notify(`Nova tarefa atribuída a você: #${ev.wp.id} "${ev.wp.subject}"`, "info");
+          message = `Nova tarefa atribuída a você: #${ev.wp.id} "${ev.wp.subject}"`;
+        }
+        if (message) {
+          notify(message, "info");
+          showBrowserNotification("Meu Board", message);
         }
       });
       setPingedIds((prev) => new Set([...prev, ...ids]));
