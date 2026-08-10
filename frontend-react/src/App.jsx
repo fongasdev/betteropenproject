@@ -84,6 +84,11 @@ export default function App() {
   const [layout, setLayout] = useState(loadLayout);
   const [resetToken, setResetToken] = useState(null);
   const [notifications, setNotifications] = useState(loadNotifications);
+  const [openProjectUrl, setOpenProjectUrl] = useState(null);
+
+  useEffect(() => {
+    api.config().then((c) => setOpenProjectUrl(c.openProjectUrl)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("op-notifications", JSON.stringify(notifications.slice(0, NOTIF_LIMIT)));
@@ -404,6 +409,7 @@ export default function App() {
           onClose={() => setOpenWp(null)}
           onDatesSaved={handleDatesSaved}
           notify={notify}
+          openProjectUrl={openProjectUrl}
         />
       )}
 

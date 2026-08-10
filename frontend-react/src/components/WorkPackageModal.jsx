@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { api } from "../api.js";
 
-export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify }) {
+export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, openProjectUrl }) {
   const [startDate, setStartDate] = useState(wp.startDate || "");
   const [dueDate, setDueDate] = useState(wp.dueDate || "");
   const [savingDates, setSavingDates] = useState(false);
@@ -77,7 +77,18 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify }) 
           <button className="modal-close" onClick={onClose}>
             ✕
           </button>
-          <h2>
+          {openProjectUrl && (
+            <a
+              className="modal-open-op"
+              href={`${openProjectUrl}/work_packages/${wp.id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Abrir no OpenProject"
+            >
+              ↗ Abrir no OpenProject
+            </a>
+          )}
+          <h2 className={openProjectUrl ? "modal-title-with-op" : undefined}>
             #{wp.id} — {wp.subject}
           </h2>
           <div className="modal-subtitle">

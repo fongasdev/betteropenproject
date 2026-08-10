@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .op_client import client, OpenProjectError
+from .op_client import client, OpenProjectError, OPENPROJECT_URL
 
 app = FastAPI(title="Better OpenProject")
 
@@ -39,6 +39,11 @@ def _id_from_href(href: Optional[str]) -> Optional[int]:
         return int(href.rstrip("/").rsplit("/", 1)[-1])
     except ValueError:
         return None
+
+
+@app.get("/api/config")
+async def config():
+    return {"openProjectUrl": OPENPROJECT_URL}
 
 
 @app.get("/api/me")

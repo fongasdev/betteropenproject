@@ -23,6 +23,8 @@ async function handle(res) {
 }
 
 export const api = {
+  config: () => fetch(`${BASE}/config`).then(handle),
+
   me: () => fetch(`${BASE}/me`).then(handle),
 
   statuses: () => fetch(`${BASE}/statuses`).then(handle),
