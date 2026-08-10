@@ -118,13 +118,10 @@ export default function App() {
       list.map((w) => (w.id === wp.id ? { ...w, status: targetStatus.name } : w))
     );
     try {
-      const allowed = await api.availableStatuses(wp.id, wp.lockVersion);
-      if (!allowed.find((s) => s.id === targetStatus.id)) {
-        const names = allowed.map((s) => s.name).join(", ") || "nenhuma";
-        notify(`Workflow não permite "${wp.status}" → "${targetStatus.name}". Permitidos: ${names}`, "error");
-        setWorkPackages(prevWps);
-        return;
-      }
+      // A troca de status pode exigir passos intermediários do workflow do
+      // OpenProject (ex.: Desenvolvendo -> Finalizado passa por Testando e
+      // Pendente-Review); quem resolve isso é o backend (move_work_package_status),
+      // então não fazemos mais checagem de transição direta aqui no front.
       const updated = await api.changeStatus(wp.id, wp.lockVersion, targetStatus.id);
       setWorkPackages((list) =>
         list.map((w) =>
