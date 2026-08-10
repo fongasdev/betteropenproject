@@ -3,6 +3,7 @@ import Board from "./components/Board.jsx";
 import WorkPackageModal from "./components/WorkPackageModal.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 import Toaster from "./components/Toaster.jsx";
+import NotificationCenter from "./components/NotificationCenter.jsx";
 import ProjectFilter from "./components/ProjectFilter.jsx";
 import StatusFilter from "./components/StatusFilter.jsx";
 import { api } from "./api.js";
@@ -10,6 +11,19 @@ import { initials, requestNotificationPermission, showBrowserNotification, playN
 import { useTaskWatcher } from "./useTaskWatcher.js";
 
 let toastSeq = 0;
+let notifSeq = 0;
+const NOTIF_LIMIT = 100;
+
+// Central de notificações persistida (localStorage), pra sobreviver a reload
+// e a notificações do navegador fechadas — igual histórico do OpenProject.
+function loadNotifications() {
+  try {
+    const raw = localStorage.getItem("op-notifications");
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
 
 function loadSelectedProjects() {
   try {
@@ -57,12 +71,37 @@ export default function App() {
   const [collapsedIds, setCollapsedIds] = useState(loadCollapsedCards);
   const [selectedStatuses, setSelectedStatuses] = useState(loadSelectedStatuses);
   const [layout, setLayout] = useState(loadLayout);
+  const [resetToken, setResetToken] = useState(null);
+  const [notifications, setNotifications] = useState(loadNotifications);
 
-  const notify = useCallback((message, kind = "success") => {
-    const id = ++toastSeq;
-    setToasts((t) => [...t, { id, message, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
+  useEffect(() => {
+    localStorage.setItem("op-notifications", JSON.stringify(notifications.slice(0, NOTIF_LIMIT)));
+  }, [notifications]);
+
+  // notify(): mostra o toast passageiro E guarda na central de notificações
+  // (persistida), pra ficar disponível mesmo se a notificação do navegador
+  // for fechada ou perdida.
+  const notify = useCallback((message, kind = "success", opts = {}) => {
+    const toastId = ++toastSeq;
+    setToasts((t) => [...t, { id: toastId, message, kind }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== toastId)), 3200);
+
+    const notifId = ++notifSeq;
+    setNotifications((list) =>
+      [
+        { id: `${Date.now()}-${notifId}`, message, kind, createdAt: new Date().toISOString(), read: false, wpId: opts.wpId ?? null },
+        ...list,
+      ].slice(0, NOTIF_LIMIT)
+    );
   }, []);
+
+  function markAllNotificationsRead() {
+    setNotifications((list) => list.map((n) => (n.read ? n : { ...n, read: true })));
+  }
+
+  function clearNotifications() {
+    setNotifications([]);
+  }
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -125,7 +164,7 @@ export default function App() {
 
   function handleTestNotification() {
     playNotificationSound();
-    showBrowserNotification("Meu Board", "Notificação de teste — se você viu/ouviu isso, está tudo certo.");
+    showBrowserNotification("Better OpenProject","Notificação de teste — se você viu/ouviu isso, está tudo certo.");
     notify("Notificação de teste disparada", "info");
   }
 
@@ -163,8 +202,8 @@ export default function App() {
           message = `Nova tarefa atribuída a você: #${ev.wp.id} "${ev.wp.subject}"`;
         }
         if (message) {
-          notify(message, "info");
-          showBrowserNotification("Meu Board", message);
+          notify(message, "info", { wpId: ev.wp.id });
+          showBrowserNotification("Better OpenProject",message);
         }
       });
       setPingedIds((prev) => new Set([...prev, ...ids]));
@@ -210,6 +249,19 @@ export default function App() {
     }
   }
 
+  // Redefine visualização: volta colunas pra ordem padrão de status (nova,
+  // backlog, backlog pronto...) e expande todos os cards recolhidos.
+  function handleResetView() {
+    setCollapsedIds(new Set());
+    setResetToken(Date.now());
+    notify("Visualização redefinida para o padrão", "info");
+  }
+
+  function handleOpenFromNotification(wpId) {
+    const wp = workPackages.find((w) => w.id === wpId);
+    if (wp) setOpenWp(wp);
+  }
+
   function handleDatesSaved(wpId, patch) {
     setWorkPackages((list) => list.map((w) => (w.id === wpId ? { ...w, ...patch } : w)));
     setOpenWp((cur) => (cur && cur.id === wpId ? { ...cur, ...patch } : cur));
@@ -220,7 +272,7 @@ export default function App() {
       <header className="topbar">
         <div className="topbar-left">
           <span className="logo">📋</span>
-          <h1>Minhas Tasks — OpenProject</h1>
+          <h1>Better OpenProject</h1>
         </div>
 
         <div className="topbar-right">
@@ -244,6 +296,14 @@ export default function App() {
             {layout === "horizontal" ? "↕ Vertical" : "↔ Horizontal"}
           </button>
 
+          <button
+            className="icon-btn"
+            onClick={handleResetView}
+            title="Restaura a ordem padrão das colunas e expande todos os cards"
+          >
+            ↺ Redefinir visualização
+          </button>
+
           <label className="switch-label">
             só as minhas
             <span className="switch" data-on={onlyMe} onClick={() => setOnlyMe((v) => !v)}>
@@ -258,6 +318,13 @@ export default function App() {
           >
             {soundOn ? "🔔" : "🔕"}
           </button>
+
+          <NotificationCenter
+            notifications={notifications}
+            onMarkAllRead={markAllNotificationsRead}
+            onClear={clearNotifications}
+            onOpenWp={handleOpenFromNotification}
+          />
 
           <button className="icon-btn" onClick={handleEnableNotifications} title="Pede permissão do navegador e ativa notificações">
             Ativar notificações
@@ -298,6 +365,7 @@ export default function App() {
           onToggleCollapse={toggleCollapse}
           selectedStatuses={selectedStatuses}
           layout={layout}
+          resetToken={resetToken}
         />
       )}
 

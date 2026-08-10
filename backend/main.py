@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from .op_client import client, OpenProjectError
 
-app = FastAPI(title="OpenProject - Meu Board")
+app = FastAPI(title="Better OpenProject")
 
 app.add_middleware(
     CORSMiddleware,

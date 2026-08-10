@@ -1,4 +1,4 @@
-# Meu Board — OpenProject
+# Better OpenProject
 
 Frontend próprio (Kanban com drag-and-drop) para suas tasks no OpenProject,
 usando a API v3 via API key. Frontend em **React** (Vite + dnd-kit +
@@ -101,6 +101,31 @@ Sobe o backend com `--reload` na 8811 e o Vite dev server na 5173 (com proxy
 de `/api` para o backend). Abra **http://127.0.0.1:5173** — mudanças no React
 aparecem na hora.
 
+## Notificações do navegador mostrando IP em vez do nome
+
+Acessando por `http://127.0.0.1:8811`, o Chrome/Edge mostra `127.0.0.1:8811`
+embaixo do título da notificação nativa — é o navegador exibindo a origem
+por segurança, não dá pra sobrescrever isso via código. Solução: acessar por
+um hostname em vez do IP puro.
+
+1. Adicione uma entrada no `/etc/hosts` apontando um nome pro localhost:
+
+   ```bash
+   echo "127.0.0.1 better-openproject.local" | sudo tee -a /etc/hosts
+   ```
+
+2. Acesse a aplicação por **http://better-openproject.local:8811** (produção,
+   via `run.sh`) ou **http://better-openproject.local:5173** (dev, via
+   `dev.sh`) em vez do IP.
+
+3. Pronto — a notificação do navegador passa a mostrar
+   `better-openproject.local` em vez de `127.0.0.1:8811`. O nome do app já
+   vem correto no título (`Better OpenProject`) desde `showBrowserNotification`
+   em `frontend-react/src/App.jsx`; só a origem embaixo depende do hostname.
+
+CORS do backend já está com `allow_origins=["*"]`
+(`backend/main.py`), então trocar de IP pra hostname não quebra nada.
+
 ## O que tem
 
 - **Board Kanban em React**: colunas por status, cards com badge de prioridade,
@@ -155,4 +180,3 @@ aparecem na hora.
 - Editar mais campos (responsável, prioridade, % concluído).
 - Suporte a múltiplos projetos/filtros salvos.
 - Notificações/atualização automática (polling ou websockets).
-# betteropenproject

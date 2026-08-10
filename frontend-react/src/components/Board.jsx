@@ -30,6 +30,7 @@ export default function Board({
   onToggleCollapse,
   selectedStatuses,
   layout = "horizontal",
+  resetToken = null,
 }) {
   const [activeWp, setActiveWp] = useState(null);
   const [activeColumn, setActiveColumn] = useState(null);
@@ -38,6 +39,14 @@ export default function Board({
   useEffect(() => {
     localStorage.setItem("op-column-order", JSON.stringify(columnOrder));
   }, [columnOrder]);
+
+  // Botão "Redefinir visualização": zera a ordem manual das colunas,
+  // voltando à ordem padrão dos status vinda do backend.
+  useEffect(() => {
+    if (resetToken === null) return;
+    setColumnOrder([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetToken]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
