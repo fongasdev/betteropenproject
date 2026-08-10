@@ -36,6 +36,21 @@ Sem essas duas variáveis o backend falha ao iniciar (`os.environ[...]`
 levanta `KeyError` de propósito, pra não subir silenciosamente sem
 credenciais).
 
+Opcionalmente, pra usar o botão **"Resolver com IA"** (manda a task direto
+pra API da Claude):
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-5   # opcional, esse é o padrão
+```
+
+- `ANTHROPIC_API_KEY`: gere em
+  [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys).
+- Sem essa variável o resto do app funciona normal — só esse botão específico
+  devolve erro 503 (`ANTHROPIC_API_KEY não configurada no backend`). O botão
+  **"Copiar prompt IA"** (que só copia o texto pra área de transferência, sem
+  chamar nenhuma API) continua funcionando sem chave nenhuma.
+
 ## Rodando (produção local — build + serve)
 
 ```bash
@@ -90,6 +105,22 @@ journalctl -u openassistent -f         # logs em tempo real
 Sempre que o arquivo `.service` for alterado, rode `sudo systemctl
 daemon-reload` antes do `restart` — senão o systemd continua usando a versão
 antiga carregada em memória e avisa "unit file ... changed on disk".
+
+### Redeploy (após atualizar o código)
+
+```bash
+./redeploy.sh
+```
+
+Rebuilda o frontend React e reinicia o serviço systemd. Se o `requirements.txt`
+mudou (dependência Python nova), instale antes — o `redeploy.sh` não faz isso
+sozinho:
+
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+Sem isso o backend quebra no import ao reiniciar.
 
 ## Rodando em modo desenvolvimento (hot reload)
 

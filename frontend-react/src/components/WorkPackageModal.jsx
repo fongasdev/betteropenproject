@@ -13,6 +13,10 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
   const [activities, setActivities] = useState([]);
   const [loadingActivities, setLoadingActivities] = useState(true);
 
+  const [generatingPrompt, setGeneratingPrompt] = useState(false);
+  const [resolvingAi, setResolvingAi] = useState(false);
+  const [aiAnswer, setAiAnswer] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     setLoadingActivities(true);
@@ -38,6 +42,56 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
       notify(e.message, "error");
     } finally {
       setSavingDates(false);
+    }
+  }
+
+  async function copyToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    // Fallback pra contexto não-seguro (http fora de localhost), onde
+    // navigator.clipboard nem existe.
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+      if (!document.execCommand("copy")) throw new Error("Cópia não suportada neste navegador");
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
+  async function copyAiPrompt() {
+    setGeneratingPrompt(true);
+    try {
+      const { prompt } = await api.aiPrompt(wp.id);
+      await copyToClipboard(prompt);
+      notify("Prompt copiado — cole no Claude Code", "success");
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setGeneratingPrompt(false);
+    }
+  }
+
+  async function resolveWithAi() {
+    notify("Função não implementada", "info");
+    return;
+    // eslint-disable-next-line no-unreachable
+    setResolvingAi(true);
+    setAiAnswer("");
+    try {
+      const { response } = await api.aiResolve(wp.id);
+      setAiAnswer(response);
+    } catch (e) {
+      notify(e.message, "error");
+    } finally {
+      setResolvingAi(false);
     }
   }
 
@@ -77,18 +131,36 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
           <button className="modal-close" onClick={onClose}>
             ✕
           </button>
-          {openProjectUrl && (
-            <a
+          <div className="modal-actions-row">
+            {openProjectUrl && (
+              <a
+                className="modal-open-op"
+                href={`${openProjectUrl}/work_packages/${wp.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Abrir no OpenProject"
+              >
+                ↗ Abrir no OpenProject
+              </a>
+            )}
+            <button
               className="modal-open-op"
-              href={`${openProjectUrl}/work_packages/${wp.id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Abrir no OpenProject"
+              onClick={copyAiPrompt}
+              disabled={generatingPrompt}
+              title="Copiar prompt para colar no Claude Code"
             >
-              ↗ Abrir no OpenProject
-            </a>
-          )}
-          <h2 className={openProjectUrl ? "modal-title-with-op" : undefined}>
+              {generatingPrompt ? "Gerando..." : "📋 Copiar prompt IA"}
+            </button>
+            <button
+              className="modal-open-op"
+              onClick={resolveWithAi}
+              disabled={resolvingAi}
+              title="Manda a task direto pra API da Claude"
+            >
+              {resolvingAi ? "Consultando..." : "✨ Resolver com IA"}
+            </button>
+          </div>
+          <h2 className="modal-title-with-op">
             #{wp.id} — {wp.subject}
           </h2>
           <div className="modal-subtitle">
@@ -120,6 +192,14 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
           <button className="btn" onClick={submitComment} disabled={postingComment || !comment.trim()}>
             {postingComment ? "Enviando..." : "Adicionar comentário"}
           </button>
+
+          {(resolvingAi || aiAnswer) && (
+            <>
+              <div className="section-title">Resposta da IA</div>
+              {resolvingAi && <div className="empty-state">Consultando Claude...</div>}
+              {!resolvingAi && aiAnswer && <div className="ai-answer">{aiAnswer}</div>}
+            </>
+          )}
 
           <div className="section-title">Histórico</div>
           {loadingActivities && <div className="empty-state">Carregando...</div>}

@@ -55,6 +55,11 @@ export const api = {
 
   activities: (wpId) => fetch(`${BASE}/work_packages/${wpId}/activities`).then(handle),
 
+  aiPrompt: (wpId) => fetch(`${BASE}/work_packages/${wpId}/ai_prompt`).then(handle),
+
+  aiResolve: (wpId) =>
+    fetch(`${BASE}/work_packages/${wpId}/ai_resolve`, { method: "POST" }).then(handle),
+
   addComment: (wpId, comment) =>
     fetch(`${BASE}/work_packages/${wpId}/comments`, {
       method: "POST",

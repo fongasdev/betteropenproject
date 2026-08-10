@@ -3,9 +3,11 @@
 Expõe uma API simplificada consumida pelo frontend estático e faz proxy
 das chamadas necessárias para a API v3 do OpenProject.
 """
+import os
 from pathlib import Path
 from typing import Optional
 
+import anthropic
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -15,6 +17,10 @@ from pydantic import BaseModel
 from .op_client import client, OpenProjectError, OPENPROJECT_URL
 
 app = FastAPI(title="Better OpenProject")
+
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
+_anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+anthropic_client = anthropic.AsyncAnthropic(api_key=_anthropic_key) if _anthropic_key else None
 
 app.add_middleware(
     CORSMiddleware,
@@ -181,6 +187,128 @@ async def activities(wp_id: int):
         return parsed
     except OpenProjectError as e:
         _err(e)
+
+
+async def _build_ai_prompt(wp_id: int) -> str:
+    """Busca a task completa no OpenProject e monta um super prompt autocontido.
+
+    A IA que recebe esse prompt não tem acesso ao OpenProject (nem ao link da
+    task) — por isso puxamos aqui tudo que ela precisaria saber (descrição,
+    metadados, comentários com autor/data) e embutimos no texto.
+    """
+    try:
+        wp = await client.get_work_package(wp_id)
+        activities_data = await client.list_activities(wp_id)
+    except OpenProjectError as e:
+        _err(e)
+
+    links = wp.get("_links", {})
+    subject = wp.get("subject") or "(sem título)"
+    wp_type = links.get("type", {}).get("title") or "—"
+    project = links.get("project", {}).get("title") or "—"
+    status = links.get("status", {}).get("title") or "—"
+    priority = links.get("priority", {}).get("title") or "—"
+    assignee = links.get("assignee", {}).get("title") or "ninguém"
+    author = links.get("author", {}).get("title") or "—"
+    start_date = wp.get("startDate") or "—"
+    due_date = wp.get("dueDate") or "—"
+    percentage = wp.get("percentageDone")
+    description = ((wp.get("description") or {}).get("raw") or "").strip()
+
+    comment_activities = [
+        a
+        for a in activities_data.get("_embedded", {}).get("elements", [])
+        if a.get("comment") and a.get("comment", {}).get("raw")
+    ]
+    missing_ids = {
+        _id_from_href(a.get("_links", {}).get("user", {}).get("href"))
+        for a in comment_activities
+    }
+    missing_ids.discard(None)
+    name_by_id = {}
+    if missing_ids:
+        import asyncio
+
+        names = await asyncio.gather(*(client.user_name(uid) for uid in missing_ids))
+        name_by_id = dict(zip(missing_ids, names))
+
+    comments = []
+    for a in comment_activities:
+        user = a.get("_links", {}).get("user", {}).get("title")
+        if not user:
+            uid = _id_from_href(a.get("_links", {}).get("user", {}).get("href"))
+            user = name_by_id.get(uid, "?")
+        when = (a.get("createdAt") or "")[:10]
+        comments.append(f"[{when} — {user}]: {a['comment']['raw'].strip()}")
+
+    parts = [
+        f"# Tarefa #{wp_id} — {subject}",
+        "",
+        "Você vai resolver a tarefa abaixo, extraída do sistema de gestão de "
+        "projetos (OpenProject). Você NÃO tem acesso ao OpenProject nem a "
+        "nenhum link dele — todo o contexto necessário já está neste prompt.",
+        "",
+        "## Metadados",
+        f"- Projeto: {project}",
+        f"- Tipo: {wp_type}",
+        f"- Status atual: {status}",
+        f"- Prioridade: {priority}",
+        f"- Responsável: {assignee}",
+        f"- Autor: {author}",
+        f"- Data de início: {start_date}",
+        f"- Prazo: {due_date}",
+        f"- Progresso: {percentage if percentage is not None else '—'}%",
+        "",
+        "## Descrição",
+        description if description else "(a task não tem descrição preenchida)",
+    ]
+    if comments:
+        parts += ["", "## Histórico de comentários (mais antigo primeiro)"]
+        parts += [f"- {c}" for c in comments]
+    parts += [
+        "",
+        "## O que fazer",
+        "1. Leia a descrição e o histórico de comentários acima com atenção — "
+        "é a única fonte de contexto sobre essa tarefa, não existe link "
+        "externo pra consultar.",
+        "2. Explore o repositório atual pra entender onde e como a mudança "
+        "deve entrar (convenções de código, arquivos relacionados, testes "
+        "existentes).",
+        "3. Implemente a solução completa — código funcional, seguindo o "
+        "estilo do projeto, com testes quando fizer sentido.",
+        "4. Se algo essencial estiver ambíguo ou faltando pra prosseguir, "
+        "pare e pergunte antes de assumir.",
+        "5. Ao final, resuma o que foi feito e liste os arquivos alterados.",
+    ]
+    return "\n".join(parts)
+
+
+@app.get("/api/work_packages/{wp_id}/ai_prompt")
+async def ai_prompt(wp_id: int):
+    """Monta um prompt pronto pra colar no Claude Code resolver a task."""
+    return {"prompt": await _build_ai_prompt(wp_id)}
+
+
+@app.post("/api/work_packages/{wp_id}/ai_resolve")
+async def ai_resolve(wp_id: int):
+    """Manda a task direto pra API da Claude e devolve a resposta do modelo."""
+    if anthropic_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY não configurada no backend.",
+        )
+    prompt = await _build_ai_prompt(wp_id)
+    try:
+        message = await anthropic_client.messages.create(
+            model=ANTHROPIC_MODEL,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIError as e:
+        raise HTTPException(status_code=502, detail=f"Erro na API da Claude: {e}")
+
+    text = "".join(block.text for block in message.content if block.type == "text")
+    return {"prompt": prompt, "response": text}
 
 
 @app.get("/api/projects")
