@@ -4,8 +4,9 @@ import WorkPackageModal from "./components/WorkPackageModal.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 import Toaster from "./components/Toaster.jsx";
 import ProjectFilter from "./components/ProjectFilter.jsx";
+import StatusFilter from "./components/StatusFilter.jsx";
 import { api } from "./api.js";
-import { initials, requestNotificationPermission, showBrowserNotification } from "./utils.js";
+import { initials, requestNotificationPermission, showBrowserNotification, playNotificationSound } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
 
 let toastSeq = 0;
@@ -19,6 +20,29 @@ function loadSelectedProjects() {
   }
 }
 
+function loadCollapsedCards() {
+  try {
+    const raw = localStorage.getItem("op-collapsed-cards");
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function loadSelectedStatuses() {
+  try {
+    const raw = localStorage.getItem("op-selected-statuses");
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function loadLayout() {
+  const v = localStorage.getItem("op-layout");
+  return v === "vertical" ? "vertical" : "horizontal";
+}
+
 export default function App() {
   const [me, setMe] = useState(null);
   const [statuses, setStatuses] = useState([]);
@@ -30,6 +54,9 @@ export default function App() {
   const [selectedProjects, setSelectedProjects] = useState(loadSelectedProjects);
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("op-sound") !== "off");
   const [pingedIds, setPingedIds] = useState(new Set());
+  const [collapsedIds, setCollapsedIds] = useState(loadCollapsedCards);
+  const [selectedStatuses, setSelectedStatuses] = useState(loadSelectedStatuses);
+  const [layout, setLayout] = useState(loadLayout);
 
   const notify = useCallback((message, kind = "success") => {
     const id = ++toastSeq;
@@ -69,15 +96,55 @@ export default function App() {
     if (soundOn) requestNotificationPermission();
   }, [soundOn]);
 
+  useEffect(() => {
+    localStorage.setItem("op-collapsed-cards", JSON.stringify([...collapsedIds]));
+  }, [collapsedIds]);
+
+  useEffect(() => {
+    localStorage.setItem("op-selected-statuses", JSON.stringify([...selectedStatuses]));
+  }, [selectedStatuses]);
+
+  useEffect(() => {
+    localStorage.setItem("op-layout", layout);
+  }, [layout]);
+
+  const toggleCollapse = useCallback((id) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  function handleEnableNotifications() {
+    requestNotificationPermission();
+    setSoundOn(true);
+    notify("Notificações ativadas neste navegador", "success");
+  }
+
+  function handleTestNotification() {
+    playNotificationSound();
+    showBrowserNotification("Meu Board", "Notificação de teste — se você viu/ouviu isso, está tudo certo.");
+    notify("Notificação de teste disparada", "info");
+  }
+
   const projectNames = useMemo(() => {
     const set = new Set(workPackages.map((w) => w.project).filter(Boolean));
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [workPackages]);
 
+  const statusNames = useMemo(() => {
+    const set = new Set(statuses.map((s) => s.name));
+    workPackages.forEach((w) => w.status && set.add(w.status));
+    return [...set];
+  }, [statuses, workPackages]);
+
   const visibleWorkPackages = useMemo(() => {
     if (selectedProjects.size === 0) return workPackages;
     return workPackages.filter((w) => selectedProjects.has(w.project));
   }, [workPackages, selectedProjects]);
+
 
   // Watcher: roda a cada 60s observando TODAS as minhas tarefas (independente
   // dos filtros visuais) e avisa com som quando outra pessoa comenta ou muda status.
@@ -163,6 +230,20 @@ export default function App() {
             onChange={setSelectedProjects}
           />
 
+          <StatusFilter
+            statuses={statusNames}
+            selected={selectedStatuses}
+            onChange={setSelectedStatuses}
+          />
+
+          <button
+            className="icon-btn"
+            onClick={() => setLayout((v) => (v === "horizontal" ? "vertical" : "horizontal"))}
+            title="Alternar layout do board"
+          >
+            {layout === "horizontal" ? "↕ Vertical" : "↔ Horizontal"}
+          </button>
+
           <label className="switch-label">
             só as minhas
             <span className="switch" data-on={onlyMe} onClick={() => setOnlyMe((v) => !v)}>
@@ -176,6 +257,14 @@ export default function App() {
             title="Ativar/desativar notificação sonora"
           >
             {soundOn ? "🔔" : "🔕"}
+          </button>
+
+          <button className="icon-btn" onClick={handleEnableNotifications} title="Pede permissão do navegador e ativa notificações">
+            Ativar notificações
+          </button>
+
+          <button className="icon-btn" onClick={handleTestNotification} title="Dispara uma notificação de teste (som + browser)">
+            Testar
           </button>
 
           <button className="icon-btn" onClick={loadAll}>
@@ -205,6 +294,10 @@ export default function App() {
           onOpenCard={setOpenWp}
           onMove={handleMove}
           pingedIds={pingedIds}
+          collapsedIds={collapsedIds}
+          onToggleCollapse={toggleCollapse}
+          selectedStatuses={selectedStatuses}
+          layout={layout}
         />
       )}
 

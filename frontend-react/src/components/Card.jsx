@@ -3,7 +3,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { motion } from "framer-motion";
 import { priorityStyle, formatDate, isOverdue } from "../utils.js";
 
-export default function Card({ wp, onOpen, pinged }) {
+export default function Card({ wp, onOpen, pinged, collapsed, onToggleCollapse }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: wp.id,
     data: { wp },
@@ -18,13 +18,18 @@ export default function Card({ wp, onOpen, pinged }) {
   const pr = priorityStyle(wp.priority);
   const overdue = isOverdue(wp.dueDate);
 
+  function handleToggleCollapse(e) {
+    e.stopPropagation();
+    onToggleCollapse?.(wp.id);
+  }
+
   return (
     <motion.div
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      className={`card${isDragging ? " dragging" : ""}`}
+      className={`card${isDragging ? " dragging" : ""}${collapsed ? " collapsed" : ""}`}
       layout
       layoutId={`card-${wp.id}`}
       initial={{ opacity: 0, y: 6 }}
@@ -35,6 +40,18 @@ export default function Card({ wp, onOpen, pinged }) {
       onClick={() => onOpen(wp)}
     >
       {pinged && <span className="ping-dot" title="Atualização recente de outra pessoa" />}
+
+      {onToggleCollapse && (
+        <button
+          className="card-collapse-btn"
+          onClick={handleToggleCollapse}
+          onPointerDown={(e) => e.stopPropagation()}
+          title={collapsed ? "Expandir card" : "Minimizar card"}
+        >
+          {collapsed ? "▸" : "▾"}
+        </button>
+      )}
+
       <div className="card-top">
         <span className="card-id">#{wp.id}</span>
         {wp.priority && (
@@ -46,28 +63,32 @@ export default function Card({ wp, onOpen, pinged }) {
 
       <div className="card-subject">{wp.subject}</div>
 
-      <div className="card-meta">
-        <span className="card-project" title={wp.project}>
-          {wp.project}
-        </span>
-        <span>{wp.type}</span>
-      </div>
-
-      {(wp.startDate || wp.dueDate) && (
-        <div className="card-dates">
-          {wp.startDate && <span className="date-chip">▶ {formatDate(wp.startDate)}</span>}
-          {wp.dueDate && (
-            <span className={`date-chip${overdue ? " overdue" : ""}`}>
-              ⏱ {formatDate(wp.dueDate)}
+      {!collapsed && (
+        <>
+          <div className="card-meta">
+            <span className="card-project" title={wp.project}>
+              {wp.project}
             </span>
-          )}
-        </div>
-      )}
+            <span>{wp.type}</span>
+          </div>
 
-      {typeof wp.percentageDone === "number" && (
-        <div className="progress-bar">
-          <div className="progress-bar-fill" style={{ width: `${wp.percentageDone}%` }} />
-        </div>
+          {(wp.startDate || wp.dueDate) && (
+            <div className="card-dates">
+              {wp.startDate && <span className="date-chip">▶ {formatDate(wp.startDate)}</span>}
+              {wp.dueDate && (
+                <span className={`date-chip${overdue ? " overdue" : ""}`}>
+                  ⏱ {formatDate(wp.dueDate)}
+                </span>
+              )}
+            </div>
+          )}
+
+          {typeof wp.percentageDone === "number" && (
+            <div className="progress-bar">
+              <div className="progress-bar-fill" style={{ width: `${wp.percentageDone}%` }} />
+            </div>
+          )}
+        </>
       )}
     </motion.div>
   );
