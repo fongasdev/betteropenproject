@@ -6,6 +6,7 @@ import Toaster from "./components/Toaster.jsx";
 import NotificationCenter from "./components/NotificationCenter.jsx";
 import ProjectFilter from "./components/ProjectFilter.jsx";
 import StatusFilter from "./components/StatusFilter.jsx";
+import TypeFilter from "./components/TypeFilter.jsx";
 import { api } from "./api.js";
 import { initials, requestNotificationPermission, showBrowserNotification, playNotificationSound } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
@@ -52,6 +53,15 @@ function loadSelectedStatuses() {
   }
 }
 
+function loadSelectedTypes() {
+  try {
+    const raw = localStorage.getItem("op-selected-types");
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
 function loadLayout() {
   const v = localStorage.getItem("op-layout");
   return v === "vertical" ? "vertical" : "horizontal";
@@ -70,6 +80,7 @@ export default function App() {
   const [pingedIds, setPingedIds] = useState(new Set());
   const [collapsedIds, setCollapsedIds] = useState(loadCollapsedCards);
   const [selectedStatuses, setSelectedStatuses] = useState(loadSelectedStatuses);
+  const [selectedTypes, setSelectedTypes] = useState(loadSelectedTypes);
   const [layout, setLayout] = useState(loadLayout);
   const [resetToken, setResetToken] = useState(null);
   const [notifications, setNotifications] = useState(loadNotifications);
@@ -144,6 +155,10 @@ export default function App() {
   }, [selectedStatuses]);
 
   useEffect(() => {
+    localStorage.setItem("op-selected-types", JSON.stringify([...selectedTypes]));
+  }, [selectedTypes]);
+
+  useEffect(() => {
     localStorage.setItem("op-layout", layout);
   }, [layout]);
 
@@ -179,10 +194,18 @@ export default function App() {
     return [...set];
   }, [statuses, workPackages]);
 
+  const typeNames = useMemo(() => {
+    const set = new Set(workPackages.map((w) => w.type).filter(Boolean));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [workPackages]);
+
   const visibleWorkPackages = useMemo(() => {
-    if (selectedProjects.size === 0) return workPackages;
-    return workPackages.filter((w) => selectedProjects.has(w.project));
-  }, [workPackages, selectedProjects]);
+    return workPackages.filter((w) => {
+      if (selectedProjects.size > 0 && !selectedProjects.has(w.project)) return false;
+      if (selectedTypes.size > 0 && !selectedTypes.has(w.type)) return false;
+      return true;
+    });
+  }, [workPackages, selectedProjects, selectedTypes]);
 
 
   // Watcher: roda a cada 60s observando TODAS as minhas tarefas (independente
@@ -286,6 +309,12 @@ export default function App() {
             statuses={statusNames}
             selected={selectedStatuses}
             onChange={setSelectedStatuses}
+          />
+
+          <TypeFilter
+            types={typeNames}
+            selected={selectedTypes}
+            onChange={setSelectedTypes}
           />
 
           <button
