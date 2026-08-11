@@ -24,6 +24,10 @@ export default function QuickSearch({ workPackages, onOpenWp, disabled }) {
       if (e.key.length !== 1) return; // só caractere imprimível (letra/número/espaço)
       const active = document.activeElement;
       if (active && (IGNORE_TAGS.has(active.tagName) || active.isContentEditable)) return;
+      // Sem isso, o campo só ganha foco depois (no effect, próximo tick) e o
+      // navegador acaba mandando o evento de digitação nativo pra ele também
+      // — duplicando a primeira letra junto com o setQuery manual abaixo.
+      e.preventDefault();
       setQuery(e.key);
     }
     window.addEventListener("keydown", onKeyDown);
