@@ -10,9 +10,11 @@ import StatusFilter from "./components/StatusFilter.jsx";
 import TypeFilter from "./components/TypeFilter.jsx";
 import ConfigVisibilityMenu, { loadVisibleConfigs } from "./components/ConfigVisibilityMenu.jsx";
 import AgendaView from "./components/AgendaView.jsx";
+import QuickSearch from "./components/QuickSearch.jsx";
 import { api } from "./api.js";
 import { initials, requestNotificationPermission, showBrowserNotification, playNotificationSound } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
+import { wpCache } from "./wpCache.js";
 
 let toastSeq = 0;
 let notifSeq = 0;
@@ -115,6 +117,7 @@ export default function App() {
   const [onlyMe, setOnlyMe] = useState(true);
   const [loading, setLoading] = useState(true);
   const [openWp, setOpenWp] = useState(null);
+  const [openWpStack, setOpenWpStack] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [selectedProjects, setSelectedProjects] = useState(loadSelectedProjects);
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("op-sound") !== "off");
@@ -175,6 +178,10 @@ export default function App() {
       setMe(meData);
       setStatuses(statusesData);
       setWorkPackages(wpData);
+      // Aquece o cache de tasks relacionadas (histórias vinculadas etc.) em
+      // background — não trava a tela, só deixa a navegação fluida quando o
+      // usuário abrir um card depois.
+      wpCache.prefetchParents(wpData);
     } catch (e) {
       notify(e.message || "Falha ao carregar dados", "error");
     } finally {
@@ -250,7 +257,7 @@ export default function App() {
 
   function handleTestNotification() {
     playNotificationSound();
-    showBrowserNotification("Better OpenProject","Notificação de teste — se você viu/ouviu isso, está tudo certo.");
+    showBrowserNotification("SmartFlow","Notificação de teste — se você viu/ouviu isso, está tudo certo.");
     notify("Notificação de teste disparada", "info");
   }
 
@@ -286,6 +293,9 @@ export default function App() {
       const ids = new Set();
       events.forEach((ev) => {
         ids.add(ev.wp.id);
+        // Task mudou (status/comentário) — descarta cache pra não servir
+        // versão velha se ela aparecer como "task relacionada" em outra.
+        wpCache.invalidate(ev.wp.id);
         const who = ev.activity?.user || "alguém";
         let message = null;
         if (ev.type === "status") {
@@ -297,7 +307,7 @@ export default function App() {
         }
         if (message) {
           notify(message, "info", { wpId: ev.wp.id });
-          showBrowserNotification("Better OpenProject",message);
+          showBrowserNotification("SmartFlow",message);
         }
       });
       setPingedIds((prev) => new Set([...prev, ...ids]));
@@ -373,6 +383,7 @@ export default function App() {
             : w
         )
       );
+      wpCache.invalidate(wp.id);
       notify(`#${wp.id} movido para "${targetStatus.name}"`, "success");
     } catch (e) {
       notify(e.message || "Falha ao mover card", "error");
@@ -391,7 +402,10 @@ export default function App() {
 
   function handleOpenFromNotification(wpId) {
     const wp = workPackages.find((w) => w.id === wpId);
-    if (wp) setOpenWp(wp);
+    if (wp) {
+      setOpenWpStack([]);
+      setOpenWp(wp);
+    }
   }
 
   function handleDatesSaved(wpId, patch) {
@@ -399,10 +413,48 @@ export default function App() {
     setOpenWp((cur) => (cur && cur.id === wpId ? { ...cur, ...patch } : cur));
   }
 
+  // Abre a task relacionada (ex.: história vinculada a uma tarefa) empilhando
+  // a atual, pra dar pra voltar. Busca avulsa porque a relacionada pode não
+  // estar na lista carregada (ex.: não atribuída a mim, filtro "só as minhas").
+  async function handleOpenRelated(wpId) {
+    try {
+      const fromList = workPackages.find((w) => w.id === wpId);
+      const related = fromList || (await wpCache.loadWorkPackage(wpId));
+      setOpenWpStack((stack) => [...stack, openWp]);
+      setOpenWp(related);
+    } catch (e) {
+      notify(e.message || "Falha ao abrir task relacionada", "error");
+    }
+  }
+
+  function handleBackWp() {
+    setOpenWpStack((stack) => {
+      if (stack.length === 0) return stack;
+      const prev = stack[stack.length - 1];
+      setOpenWp(prev);
+      return stack.slice(0, -1);
+    });
+  }
+
+  function handleCloseWp() {
+    setOpenWp(null);
+    setOpenWpStack([]);
+  }
+
+  function handleOpenFromSearch(wp) {
+    setOpenWpStack([]);
+    setOpenWp(wp);
+  }
+
   return (
     <div className="app">
+      <QuickSearch workPackages={workPackages} onOpenWp={handleOpenFromSearch} disabled={!!openWp} />
+
       <header className="topbar">
-        <ConfigVisibilityMenu visible={visibleConfigs} onChange={setVisibleConfigs} />
+        <div className="topbar-brand">
+          <img src="/favicon.svg" alt="" className="topbar-brand-logo" />
+          <span className="topbar-brand-name">SmartFlow</span>
+        </div>
 
         <div className="view-tabs">
           <button
@@ -529,6 +581,8 @@ export default function App() {
               <span>{me.name}</span>
             </div>
           )}
+
+          <ConfigVisibilityMenu visible={visibleConfigs} onChange={setVisibleConfigs} />
         </div>
       </header>
 
@@ -543,7 +597,7 @@ export default function App() {
         <Board
           statuses={statuses}
           workPackages={visibleWorkPackages}
-          onOpenCard={setOpenWp}
+          onOpenCard={(wp) => { setOpenWpStack([]); setOpenWp(wp); }}
           onMove={handleMove}
           pingedIds={pingedIds}
           collapsedIds={collapsedIds}
@@ -560,16 +614,17 @@ export default function App() {
       {openWp && (
         <WorkPackageModal
           wp={openWp}
-          onClose={() => setOpenWp(null)}
+          onClose={handleCloseWp}
           onDatesSaved={handleDatesSaved}
           notify={notify}
           openProjectUrl={openProjectUrl}
+          onOpenRelated={handleOpenRelated}
+          canGoBack={openWpStack.length > 0}
+          onBack={handleBackWp}
         />
       )}
 
       <Toaster toasts={toasts} />
-
-      <span className="app-brand-watermark">Better OpenProject</span>
     </div>
   );
 }

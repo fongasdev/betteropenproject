@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from .op_client import client, OpenProjectError, OPENPROJECT_URL
 from . import schedule_db
 
-app = FastAPI(title="Better OpenProject")
+app = FastAPI(title="SmartFlow")
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
 _anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -71,6 +71,30 @@ async def statuses():
         _err(e)
 
 
+def _serialize_wp(wp: dict) -> dict:
+    links = wp.get("_links", {})
+    project_link = links.get("project", {})
+    parent_link = links.get("parent", {})
+    return {
+        "id": wp["id"],
+        "subject": wp.get("subject"),
+        "type": links.get("type", {}).get("title"),
+        "status": links.get("status", {}).get("title"),
+        "statusHref": links.get("status", {}).get("href"),
+        "project": project_link.get("title"),
+        "projectId": _id_from_href(project_link.get("href")),
+        "assignee": links.get("assignee", {}).get("title"),
+        "startDate": wp.get("startDate"),
+        "dueDate": wp.get("dueDate"),
+        "updatedAt": wp.get("updatedAt"),
+        "lockVersion": wp.get("lockVersion"),
+        "percentageDone": wp.get("percentageDone"),
+        "priority": links.get("priority", {}).get("title"),
+        "parentId": _id_from_href(parent_link.get("href")),
+        "parentTitle": parent_link.get("title"),
+    }
+
+
 @app.get("/api/work_packages")
 async def work_packages(only_me: bool = True):
     try:
@@ -80,28 +104,18 @@ async def work_packages(only_me: bool = True):
             assignee = str(user["id"])
         data = await client.list_work_packages(assignee=assignee)
         elements = data.get("_embedded", {}).get("elements", [])
-        # Formato simplificado para o frontend
-        result = []
-        for wp in elements:
-            links = wp.get("_links", {})
-            project_link = links.get("project", {})
-            result.append({
-                "id": wp["id"],
-                "subject": wp.get("subject"),
-                "type": links.get("type", {}).get("title"),
-                "status": links.get("status", {}).get("title"),
-                "statusHref": links.get("status", {}).get("href"),
-                "project": project_link.get("title"),
-                "projectId": _id_from_href(project_link.get("href")),
-                "assignee": links.get("assignee", {}).get("title"),
-                "startDate": wp.get("startDate"),
-                "dueDate": wp.get("dueDate"),
-                "updatedAt": wp.get("updatedAt"),
-                "lockVersion": wp.get("lockVersion"),
-                "percentageDone": wp.get("percentageDone"),
-                "priority": links.get("priority", {}).get("title"),
-            })
-        return result
+        return [_serialize_wp(wp) for wp in elements]
+    except OpenProjectError as e:
+        _err(e)
+
+
+@app.get("/api/work_packages/{wp_id}")
+async def get_work_package_detail(wp_id: int):
+    """Retorna uma task avulsa (usado pra abrir a task relacionada/pai a
+    partir do card de outra, sem depender da lista já carregada)."""
+    try:
+        wp = await client.get_work_package(wp_id)
+        return _serialize_wp(wp)
     except OpenProjectError as e:
         _err(e)
 
@@ -459,6 +473,9 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 @app.get("/{full_path:path}")
 async def spa(full_path: str):
-    # Deixa a API responder normalmente; qualquer outra rota cai no index.html
-    # (roteamento client-side do React, se um dia for adicionado).
+    # Serve arquivos estáticos da raiz do build (ex.: favicon.svg) diretamente;
+    # qualquer outra rota cai no index.html (roteamento client-side do React).
+    candidate = FRONTEND_DIR / full_path
+    if full_path and candidate.is_file():
+        return FileResponse(str(candidate))
     return FileResponse(str(FRONTEND_DIR / "index.html"))

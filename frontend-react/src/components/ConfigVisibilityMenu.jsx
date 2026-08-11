@@ -52,12 +52,11 @@ export default function ConfigVisibilityMenu({ visible, onChange }) {
   return (
     <div className="config-visibility-menu" ref={rootRef}>
       <button
-        className="icon-btn topbar-left topbar-collapse-btn"
+        className="icon-btn topbar-collapse-btn"
         onClick={() => setOpen((v) => !v)}
         title="Escolher quais configurações aparecem"
       >
         <span className="logo">⚙</span>
-        <h1>Configurações</h1>
       </button>
 
       <AnimatePresence>

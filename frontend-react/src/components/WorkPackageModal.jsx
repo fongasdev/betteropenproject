@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { api } from "../api.js";
+import { wpCache } from "../wpCache.js";
 
-export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, openProjectUrl }) {
+export default function WorkPackageModal({
+  wp,
+  onClose,
+  onDatesSaved,
+  notify,
+  openProjectUrl,
+  onOpenRelated,
+  canGoBack,
+  onBack,
+}) {
   const [startDate, setStartDate] = useState(wp.startDate || "");
   const [dueDate, setDueDate] = useState(wp.dueDate || "");
   const [savingDates, setSavingDates] = useState(false);
+
+  const [parentWp, setParentWp] = useState(null);
+  const [loadingParent, setLoadingParent] = useState(false);
 
   const [comment, setComment] = useState("");
   const [postingComment, setPostingComment] = useState(false);
@@ -18,11 +31,28 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
   const [resolvingAi, setResolvingAi] = useState(false);
   const [aiAnswer, setAiAnswer] = useState("");
 
+  // O modal é reaproveitado ao navegar entre tasks relacionadas (mesma
+  // instância, prop `wp` trocada), então precisa ressincronizar tudo que
+  // dependia do valor inicial de `wp` a cada troca de id.
+  useEffect(() => {
+    setStartDate(wp.startDate || "");
+    setDueDate(wp.dueDate || "");
+  }, [wp.id]);
+
+  // Atividades/comentários: mostra o que já está em cache na hora (rápido a
+  // partir da 2ª visita) e revalida em background — se tiver comentário novo
+  // a lista é atualizada sozinha, sem o usuário perceber espera nenhuma.
   useEffect(() => {
     let cancelled = false;
-    setLoadingActivities(true);
-    api
-      .activities(wp.id)
+    const cached = wpCache.peekActivities(wp.id);
+    if (cached) {
+      setActivities(cached.filter((a) => a.comment));
+      setLoadingActivities(false);
+    } else {
+      setLoadingActivities(true);
+    }
+    wpCache
+      .loadActivities(wp.id)
       .then((data) => {
         if (!cancelled) setActivities(data.filter((a) => a.comment));
       })
@@ -33,11 +63,34 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
     };
   }, [wp.id]);
 
+  // Task relacionada (pai/história vinculada): idem — cache primeiro,
+  // revalida em background pra pegar qualquer alteração sem recarregar tudo.
+  useEffect(() => {
+    let cancelled = false;
+    if (!wp.parentId) {
+      setParentWp(null);
+      setLoadingParent(false);
+      return;
+    }
+    const cached = wpCache.peekWorkPackage(wp.parentId);
+    setParentWp(cached);
+    setLoadingParent(!cached);
+    wpCache
+      .loadWorkPackage(wp.parentId)
+      .then((data) => !cancelled && setParentWp(data))
+      .catch(() => {})
+      .finally(() => !cancelled && setLoadingParent(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [wp.id, wp.parentId]);
+
   async function saveDates() {
     setSavingDates(true);
     try {
       const updated = await api.changeDates(wp.id, wp.lockVersion, startDate || null, dueDate || null);
       onDatesSaved(wp.id, { startDate, dueDate, lockVersion: updated.lockVersion });
+      wpCache.loadWorkPackage(wp.id, { force: true }).catch(() => {});
       notify("Datas atualizadas", "success");
     } catch (e) {
       notify(e.message, "error");
@@ -117,7 +170,10 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
       await api.addComment(wp.id, text);
       setComment("");
       notify("Comentário adicionado", "success");
-      const data = await api.activities(wp.id);
+      // força revalidação — comentário acabou de mudar o updatedAt, não pode
+      // ficar servindo cache velho até o cooldown expirar.
+      const data = await wpCache.loadActivities(wp.id, { force: true });
+      wpCache.loadWorkPackage(wp.id, { force: true }).catch(() => {});
       setActivities(data.filter((a) => a.comment));
     } catch (e) {
       notify(e.message, "error");
@@ -135,13 +191,19 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
         exit={{ opacity: 0 }}
         onClick={(e) => e.target === e.currentTarget && onClose()}
       >
-        <motion.div
-          className="modal"
-          initial={{ opacity: 0, scale: 0.94, y: 16 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 8 }}
-          transition={{ type: "spring", stiffness: 420, damping: 32 }}
-        >
+        <div className="modal-shell">
+          {canGoBack && (
+            <button className="modal-back" onClick={onBack} title="Voltar para a task anterior">
+              ← Voltar
+            </button>
+          )}
+          <motion.div
+            className="modal"
+            initial={{ opacity: 0, scale: 0.94, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ type: "spring", stiffness: 420, damping: 32 }}
+          >
           <button className="modal-close" onClick={onClose}>
             ✕
           </button>
@@ -201,6 +263,30 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
             {wp.project} · {wp.type} · status atual: <strong>{wp.status}</strong>
           </div>
 
+          {wp.parentId && (
+            <div className="related-wp-section">
+              <div className="section-title">Task relacionada</div>
+              {loadingParent && <div className="empty-state">Carregando...</div>}
+              {!loadingParent && parentWp && (
+                <button
+                  className="related-wp-card"
+                  onClick={() => onOpenRelated(parentWp.id)}
+                  title="Abrir task relacionada"
+                >
+                  <span className="related-wp-card-top">
+                    <span className="related-wp-id">#{parentWp.id}</span>
+                    <span className="related-wp-type">{parentWp.type}</span>
+                  </span>
+                  <span className="related-wp-subject">{parentWp.subject}</span>
+                  <span className="related-wp-status">{parentWp.status}</span>
+                </button>
+              )}
+              {!loadingParent && !parentWp && (
+                <div className="empty-state">Não foi possível carregar a task relacionada.</div>
+              )}
+            </div>
+          )}
+
           <div className="dates-row">
             <div className="field">
               <label>Data de início</label>
@@ -251,7 +337,8 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
               <div className="activity-body">{a.comment}</div>
             </div>
           ))}
-        </motion.div>
+          </motion.div>
+        </div>
       </motion.div>
     </AnimatePresence>
   );

@@ -1,4 +1,4 @@
-# Better OpenProject
+# SmartFlow
 
 Frontend próprio (Kanban com drag-and-drop) para suas tasks no OpenProject,
 usando a API v3 via API key. Frontend em **React** (Vite + dnd-kit +
@@ -151,7 +151,7 @@ um hostname em vez do IP puro.
 
 3. Pronto — a notificação do navegador passa a mostrar
    `better-openproject.local` em vez de `127.0.0.1:8811`. O nome do app já
-   vem correto no título (`Better OpenProject`) desde `showBrowserNotification`
+   vem correto no título (`SmartFlow`) desde `showBrowserNotification`
    em `frontend-react/src/App.jsx`; só a origem embaixo depende do hostname.
 
 CORS do backend já está com `allow_origins=["*"]`

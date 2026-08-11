@@ -34,6 +34,8 @@ export const api = {
   workPackages: (onlyMe) =>
     fetch(`${BASE}/work_packages?only_me=${onlyMe}`).then(handle),
 
+  workPackage: (wpId) => fetch(`${BASE}/work_packages/${wpId}`).then(handle),
+
   availableStatuses: (wpId, lockVersion) =>
     fetch(`${BASE}/work_packages/${wpId}/available_statuses?lock_version=${lockVersion}`).then(
       handle
