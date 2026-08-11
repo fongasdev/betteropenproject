@@ -1268,14 +1268,49 @@ button {
 }
 
 .agenda-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--danger);
   margin-bottom: 12px;
+}
+
+.agenda-error-dismiss {
+  color: var(--danger);
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+
+.agenda-view-toggle {
+  display: flex;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.agenda-view-toggle .icon-btn.active {
+  background: var(--accent, var(--border));
+  color: var(--text);
 }
 
 .agenda-week {
   display: grid;
   grid-template-columns: repeat(5, minmax(200px, 1fr));
   gap: 12px;
+}
+
+.agenda-month {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.agenda-month .agenda-day {
+  min-height: 100px;
+}
+
+.agenda-month .agenda-day.outside-month {
+  opacity: 0.45;
 }
 
 .agenda-day {
@@ -1311,12 +1346,33 @@ button {
   padding: 8px 0;
 }
 
+.agenda-day.past .agenda-day-header {
+  opacity: 0.7;
+}
+
 .agenda-entry {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
   margin-bottom: 8px;
+}
+
+.agenda-entry.overdue {
+  border-color: var(--danger);
+  background: rgba(229, 72, 77, 0.08);
+}
+
+.agenda-entry-overdue-badge {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--danger);
+  border-radius: 4px;
+  padding: 1px 6px;
+  vertical-align: middle;
 }
 
 .agenda-entry-title {

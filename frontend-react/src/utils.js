@@ -28,6 +28,18 @@ export function formatDate(iso) {
   return `${d}/${m}/${y}`;
 }
 
+/** Status que contam como "tarefa finalizada" (não deve ser marcada como atrasada). */
+export function isFinishedStatus(name) {
+  const n = (name || "").toLowerCase();
+  return (
+    n.includes("final") ||
+    n.includes("conclu") ||
+    n.includes("done") ||
+    n.includes("rejeit") ||
+    n.includes("cancel")
+  );
+}
+
 export function isOverdue(dueDate) {
   if (!dueDate) return false;
   const today = new Date();

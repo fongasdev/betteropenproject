@@ -4,6 +4,7 @@ Expõe uma API simplificada consumida pelo frontend estático e faz proxy
 das chamadas necessárias para a API v3 do OpenProject.
 """
 import os
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -414,17 +415,27 @@ async def get_schedule(start: Optional[str] = None, end: Optional[str] = None):
 
 @app.post("/api/schedule")
 async def add_schedule_entry(body: ScheduleEntryCreate):
+    if body.date < date.today().isoformat():
+        raise HTTPException(status_code=400, detail="Não é possível agendar para uma data passada")
     return schedule_db.create_entry(body.wp_id, body.wp_subject, body.date, body.estimated_hours)
 
 
 @app.patch("/api/schedule/{entry_id}")
 async def patch_schedule_entry(entry_id: int, body: ScheduleEntryUpdate):
+    if body.date is not None and body.date < date.today().isoformat():
+        raise HTTPException(status_code=400, detail="Não é possível agendar para uma data passada")
     entry = schedule_db.update_entry(
         entry_id, date=body.date, estimated_hours=body.estimated_hours, position=body.position
     )
     if entry is None:
         raise HTTPException(status_code=404, detail="Entrada não encontrada")
     return entry
+
+
+@app.delete("/api/schedule/by_wp/{wp_id}")
+async def remove_schedule_by_wp(wp_id: int):
+    schedule_db.delete_by_wp_id(wp_id)
+    return {"ok": True}
 
 
 @app.delete("/api/schedule/{entry_id}")

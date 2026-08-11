@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
-import { priorityStyle } from "../utils.js";
+import { priorityStyle, isFinishedStatus } from "../utils.js";
 
 const DAY_CAPACITY_HOURS = 7;
 const MAX_ESTIMATE_DAYS = 30;
@@ -36,16 +36,37 @@ function buildWeekDays(anchor) {
   });
 }
 
+// Grade do mês inteiro (todas as semanas que tocam o mês, seg–dom, incluindo
+// dias de meses vizinhos pra completar a semana).
+function buildMonthDays(anchor) {
+  const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  const start = startOfWeek(first);
+  const end = new Date(startOfWeek(last));
+  end.setDate(end.getDate() + 6);
+  const days = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
 export default function AgendaView({ workPackages }) {
   const [anchor, setAnchor] = useState(() => new Date());
+  const [viewMode, setViewMode] = useState("week"); // "week" | "month"
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pickerDate, setPickerDate] = useState(null);
 
   const weekDays = useMemo(() => buildWeekDays(anchor), [anchor]);
-  const rangeStart = toISODate(weekDays[0]);
-  const rangeEnd = toISODate(weekDays[weekDays.length - 1]);
+  const monthDays = useMemo(() => buildMonthDays(anchor), [anchor]);
+  const gridDays = viewMode === "month" ? monthDays : weekDays;
+  const rangeStart = toISODate(gridDays[0]);
+  const rangeEnd = toISODate(gridDays[gridDays.length - 1]);
+  const todayISO = toISODate(new Date());
 
   async function reload() {
     setLoading(true);
@@ -93,6 +114,10 @@ export default function AgendaView({ workPackages }) {
       setError("Estimativa de horas inválida.");
       return;
     }
+    if (pickerDate < todayISO) {
+      setError("Não é possível agendar para uma data passada.");
+      return;
+    }
     try {
       let date = pickerDate;
       const spilledDays = [];
@@ -128,7 +153,19 @@ export default function AgendaView({ workPackages }) {
     reload();
   }
 
+  // Desagendar: tira a tarefa de todos os dias/agendas em que foi planejada,
+  // não só do dia atual.
+  async function handleUnschedule(wpId, wpSubject) {
+    if (!window.confirm(`Desagendar "${wpSubject}"? Remove de todos os dias da agenda.`)) return;
+    await api.unscheduleWorkPackage(wpId);
+    reload();
+  }
+
   async function handleMoveDay(entryId, newDate) {
+    if (newDate < todayISO) {
+      setError("Não é possível agendar para uma data passada.");
+      return;
+    }
     await api.updateScheduleEntry(entryId, { date: newDate });
     reload();
   }
@@ -140,41 +177,75 @@ export default function AgendaView({ workPackages }) {
     reload();
   }
 
-  function shiftWeek(delta) {
+  function shiftPeriod(delta) {
     setAnchor((cur) => {
       const d = new Date(cur);
-      d.setDate(d.getDate() + delta * 7);
+      if (viewMode === "month") {
+        d.setMonth(d.getMonth() + delta);
+      } else {
+        d.setDate(d.getDate() + delta * 7);
+      }
       return d;
     });
   }
 
+  const MONTH_LABEL = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+  ];
+
   return (
     <div className="agenda-view">
       <div className="agenda-toolbar">
-        <button className="icon-btn" onClick={() => shiftWeek(-1)} title="Semana anterior">
-          ← Semana
+        <div className="agenda-view-toggle">
+          <button
+            className={`icon-btn${viewMode === "week" ? " active" : ""}`}
+            onClick={() => setViewMode("week")}
+          >
+            Semana
+          </button>
+          <button
+            className={`icon-btn${viewMode === "month" ? " active" : ""}`}
+            onClick={() => setViewMode("month")}
+          >
+            Mês
+          </button>
+        </div>
+        <button className="icon-btn" onClick={() => shiftPeriod(-1)} title="Período anterior">
+          ← {viewMode === "month" ? "Mês" : "Semana"}
         </button>
-        <button className="icon-btn" onClick={() => setAnchor(new Date())} title="Ir pra semana atual">
+        <button className="icon-btn" onClick={() => setAnchor(new Date())} title="Ir pra hoje">
           Hoje
         </button>
-        <button className="icon-btn" onClick={() => shiftWeek(1)} title="Próxima semana">
-          Semana →
+        <button className="icon-btn" onClick={() => shiftPeriod(1)} title="Próximo período">
+          {viewMode === "month" ? "Mês" : "Semana"} →
         </button>
         <span className="agenda-range">
-          {rangeStart} — {rangeEnd}
+          {viewMode === "month"
+            ? `${MONTH_LABEL[anchor.getMonth()]} de ${anchor.getFullYear()}`
+            : `${rangeStart} — ${rangeEnd}`}
         </span>
       </div>
 
-      {error && <div className="agenda-error">{error}</div>}
+      {error && (
+        <div className="agenda-error">
+          <span>{error}</span>
+          <button className="icon-btn agenda-error-dismiss" onClick={() => setError("")} title="Ocultar mensagem">
+            ✕
+          </button>
+        </div>
+      )}
 
-      <div className="agenda-week">
-        {weekDays.map((d) => {
+      <div className={viewMode === "month" ? "agenda-month" : "agenda-week"}>
+        {gridDays.map((d) => {
           const iso = toISODate(d);
           const dayEntries = entriesByDate[iso] || [];
           const usedHours = dayEntries.reduce((sum, e) => sum + e.estimated_hours, 0);
           const over = usedHours > DAY_CAPACITY_HOURS;
+          const outsideMonth = viewMode === "month" && d.getMonth() !== anchor.getMonth();
+          const isPast = iso < todayISO;
           return (
-            <div className="agenda-day" key={iso}>
+            <div className={`agenda-day${outsideMonth ? " outside-month" : ""}${isPast ? " past" : ""}`} key={iso}>
               <div className="agenda-day-header">
                 <strong>
                   {WEEKDAY_LABEL[d.getDay()]} {d.getDate()}/{d.getMonth() + 1}
@@ -190,10 +261,12 @@ export default function AgendaView({ workPackages }) {
                 {dayEntries.map((e) => {
                   const wp = (workPackages || []).find((w) => w.id === e.wp_id);
                   const pr = wp ? priorityStyle(wp.priority) : null;
+                  const overdue = isPast && !isFinishedStatus(wp?.status);
                   return (
-                  <div className="agenda-entry" key={e.id}>
+                  <div className={`agenda-entry${overdue ? " overdue" : ""}`} key={e.id}>
                     <div className="agenda-entry-title">
                       #{e.wp_id} — {e.wp_subject}
+                      {overdue && <span className="agenda-entry-overdue-badge">atrasada</span>}
                     </div>
                     {wp && (
                       <div className="agenda-entry-meta">
@@ -214,30 +287,42 @@ export default function AgendaView({ workPackages }) {
                     />
                     <div className="agenda-entry-controls">
                       <select value={iso} onChange={(ev) => handleMoveDay(e.id, ev.target.value)}>
-                        {weekDays.map((wd) => (
-                          <option key={toISODate(wd)} value={toISODate(wd)}>
-                            {WEEKDAY_LABEL[wd.getDay()]} {wd.getDate()}/{wd.getMonth() + 1}
-                          </option>
-                        ))}
+                        {gridDays.map((wd) => {
+                          const wdIso = toISODate(wd);
+                          return (
+                            <option key={wdIso} value={wdIso} disabled={wdIso < todayISO}>
+                              {WEEKDAY_LABEL[wd.getDay()]} {wd.getDate()}/{wd.getMonth() + 1}
+                            </option>
+                          );
+                        })}
                       </select>
                       <button
                         className="icon-btn agenda-entry-remove"
                         onClick={() => handleDelete(e.id)}
-                        title="Remover do planejamento"
+                        title="Remover desse dia"
                       >
                         ✕
+                      </button>
+                      <button
+                        className="icon-btn agenda-entry-unschedule"
+                        onClick={() => handleUnschedule(e.wp_id, e.wp_subject)}
+                        title="Desagendar (remove de todos os dias)"
+                      >
+                        🗑️
                       </button>
                     </div>
                   </div>
                   );
                 })}
-                <button
-                  className="icon-btn agenda-add-btn"
-                  onClick={() => setPickerDate(iso)}
-                  title="Adicionar tarefa nesse dia"
-                >
-                  + tarefa
-                </button>
+                {!isPast && (
+                  <button
+                    className="icon-btn agenda-add-btn"
+                    onClick={() => setPickerDate(iso)}
+                    title="Adicionar tarefa nesse dia"
+                  >
+                    + tarefa
+                  </button>
+                )}
               </div>
             </div>
           );

@@ -118,3 +118,9 @@ def get_entry(entry_id: int):
 def delete_entry(entry_id: int):
     with _conn() as conn:
         conn.execute("DELETE FROM schedule_entries WHERE id = ?", (entry_id,))
+
+
+def delete_by_wp_id(wp_id: int):
+    """Remove a tarefa de todos os dias/agendas em que ela foi planejada."""
+    with _conn() as conn:
+        conn.execute("DELETE FROM schedule_entries WHERE wp_id = ?", (wp_id,))

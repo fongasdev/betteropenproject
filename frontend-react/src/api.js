@@ -95,6 +95,9 @@ export const api = {
 
   deleteScheduleEntry: (entryId) =>
     fetch(`${BASE}/schedule/${entryId}`, { method: "DELETE" }).then(handle),
+
+  unscheduleWorkPackage: (wpId) =>
+    fetch(`${BASE}/schedule/by_wp/${wpId}`, { method: "DELETE" }).then(handle),
 };
 
 export { ApiError };
