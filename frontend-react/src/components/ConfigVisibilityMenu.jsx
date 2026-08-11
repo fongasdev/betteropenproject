@@ -8,6 +8,7 @@ export const CONFIG_ITEMS = [
   { id: "layoutToggle", label: "Alternar layout do board" },
   { id: "resetView", label: "Redefinir visualização" },
   { id: "onlyMe", label: "Só as minhas" },
+  { id: "hideEmptyColumns", label: "Ocultar colunas vazias" },
   { id: "soundToggle", label: "Notificação sonora" },
   { id: "notificationCenter", label: "Central de notificações" },
   { id: "enableNotifications", label: "Ativar notificações" },

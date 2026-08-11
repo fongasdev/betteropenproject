@@ -31,6 +31,7 @@ export default function Board({
   collapsedColumns,
   onToggleColumnCollapse,
   selectedStatuses,
+  hideEmptyColumns = false,
   layout = "horizontal",
   resetToken = null,
 }) {
@@ -63,10 +64,15 @@ export default function Board({
     used.forEach((name) => {
       if (!ordered.find((s) => s.name === name)) ordered.push({ id: null, name });
     });
-    const filtered =
+    let filtered =
       selectedStatuses && selectedStatuses.size > 0
         ? ordered.filter((s) => selectedStatuses.has(s.name))
         : ordered;
+
+    // "Ocultar colunas vazias": só mostra status com pelo menos uma tarefa.
+    if (hideEmptyColumns) {
+      filtered = filtered.filter((s) => used.has(s.name));
+    }
 
     // Aplica a ordem manual salva (arrastar coluna); nomes sem posição salva
     // ficam no final, na ordem original.
@@ -78,7 +84,7 @@ export default function Board({
       if (ib === -1) return -1;
       return ia - ib;
     });
-  }, [statuses, workPackages, selectedStatuses, columnOrder]);
+  }, [statuses, workPackages, selectedStatuses, hideEmptyColumns, columnOrder]);
 
   const columnIds = useMemo(() => columns.map((s) => `col-${s.name}`), [columns]);
 

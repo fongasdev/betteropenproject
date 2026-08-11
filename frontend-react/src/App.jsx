@@ -94,6 +94,10 @@ function loadLayout() {
   return v === "vertical" ? "vertical" : "horizontal";
 }
 
+function loadHideEmptyColumns() {
+  return localStorage.getItem("op-hide-empty-columns") === "on";
+}
+
 function loadCollapsedColumns() {
   try {
     const raw = localStorage.getItem("op-collapsed-columns");
@@ -123,6 +127,7 @@ export default function App() {
   const [openProjectUrl, setOpenProjectUrl] = useState(null);
   const [visibleConfigs, setVisibleConfigs] = useState(loadVisibleConfigs);
   const [collapsedColumns, setCollapsedColumns] = useState(loadCollapsedColumns);
+  const [hideEmptyColumns, setHideEmptyColumns] = useState(loadHideEmptyColumns);
 
   useEffect(() => {
     api.config().then((c) => setOpenProjectUrl(c.openProjectUrl)).catch(() => {});
@@ -212,6 +217,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("op-collapsed-columns", JSON.stringify([...collapsedColumns]));
   }, [collapsedColumns]);
+
+  useEffect(() => {
+    localStorage.setItem("op-hide-empty-columns", hideEmptyColumns ? "on" : "off");
+  }, [hideEmptyColumns]);
 
   const toggleCollapse = useCallback((id) => {
     setCollapsedIds((prev) => {
@@ -434,6 +443,19 @@ export default function App() {
             </button>
           )}
 
+          {visibleConfigs.has("hideEmptyColumns") && (
+            <label className="switch-label">
+              ocultar colunas vazias
+              <span
+                className="switch"
+                data-on={hideEmptyColumns}
+                onClick={() => setHideEmptyColumns((v) => !v)}
+              >
+                <span className="knob" />
+              </span>
+            </label>
+          )}
+
           {visibleConfigs.has("onlyMe") && (
             <label className="switch-label">
               só as minhas
@@ -510,6 +532,7 @@ export default function App() {
           collapsedColumns={collapsedColumns}
           onToggleColumnCollapse={toggleColumnCollapse}
           selectedStatuses={selectedStatuses}
+          hideEmptyColumns={hideEmptyColumns}
           layout={layout}
           resetToken={resetToken}
         />
