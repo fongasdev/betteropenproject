@@ -178,7 +178,7 @@ button {
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   margin-right: 4px;
   flex-shrink: 0;
 }
@@ -196,6 +196,18 @@ button {
   letter-spacing: -0.2px;
   color: #fff;
   white-space: nowrap;
+}
+
+.app-version-watermark {
+  position: fixed;
+  right: 16px;
+  bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.4;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
 }
 
 .topbar-left {

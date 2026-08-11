@@ -11,6 +11,7 @@ import TypeFilter from "./components/TypeFilter.jsx";
 import ConfigVisibilityMenu, { loadVisibleConfigs } from "./components/ConfigVisibilityMenu.jsx";
 import AgendaView from "./components/AgendaView.jsx";
 import QuickSearch from "./components/QuickSearch.jsx";
+import { APP_VERSION, APP_VERSION_DATE } from "./version.js";
 import { api } from "./api.js";
 import { initials, requestNotificationPermission, showBrowserNotification, playNotificationSound } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
@@ -451,9 +452,9 @@ export default function App() {
       <QuickSearch workPackages={workPackages} onOpenWp={handleOpenFromSearch} disabled={!!openWp} />
 
       <header className="topbar">
-        <div className="topbar-brand">
+        <div className="topbar-brand" aria-label="SmartFlow">
           <img src="/favicon.svg" alt="" className="topbar-brand-logo" />
-          <span className="topbar-brand-name">SmartFlow</span>
+          <span className="topbar-brand-name" aria-hidden="true">martFlow</span>
         </div>
 
         <div className="view-tabs">
@@ -625,6 +626,10 @@ export default function App() {
       )}
 
       <Toaster toasts={toasts} />
+
+      <span className="app-version-watermark">
+        SmartFlow v{APP_VERSION} · {APP_VERSION_DATE}
+      </span>
     </div>
   );
 }
