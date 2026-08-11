@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { api } from "./api.js";
 import { playNotificationSound } from "./utils.js";
 
-const POLL_MS = 60_000;
+const POLL_MS = 30_000;
 
 /**
  * Observa TODAS as minhas tarefas (independente dos filtros da tela) a cada

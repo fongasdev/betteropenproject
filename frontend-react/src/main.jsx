@@ -2,12 +2,15 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import { ThemeProvider } from "./ThemeContext.jsx";
+import { PaletteProvider } from "./PaletteContext.jsx";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <ThemeProvider>
-      <App />
+      <PaletteProvider>
+        <App />
+      </PaletteProvider>
     </ThemeProvider>
   </React.StrictMode>
 );

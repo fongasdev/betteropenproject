@@ -220,6 +220,21 @@ class OpenProjectClient:
         self._user_name_cache[user_id] = name
         return name
 
+    # ---- Notificações nativas do OpenProject ----
+    async def list_notifications(self, page_size: int = 200) -> dict:
+        """Notificações do usuário autenticado (menções, atribuições,
+        comentários, alertas de data, etc.), mais recentes primeiro.
+
+        Não filtramos `readIAN` no servidor (a sintaxe de filtro booleano da
+        API v3 não é bem documentada) — pegamos a página e filtramos as não
+        lidas aqui no client.
+        """
+        params = {
+            "pageSize": str(page_size),
+            "sortBy": json.dumps([["createdAt", "desc"]]),
+        }
+        return await self._request("GET", "/notifications", params=params)
+
     async def add_comment(self, wp_id: int, comment: str) -> dict:
         return await self._request(
             "POST",

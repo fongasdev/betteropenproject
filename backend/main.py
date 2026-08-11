@@ -189,6 +189,34 @@ async def activities(wp_id: int):
         _err(e)
 
 
+@app.get("/api/notifications")
+async def notifications():
+    """Notificações não lidas do usuário no OpenProject (bell nativo dele) —
+    pra exibir junto das notificações geradas aqui no watcher local.
+    """
+    try:
+        data = await client.list_notifications()
+    except OpenProjectError as e:
+        _err(e)
+    elements = data.get("_embedded", {}).get("elements", [])
+    result = []
+    for n in elements:
+        if n.get("readIAN"):
+            continue
+        links = n.get("_links", {})
+        resource = links.get("resource", {})
+        actor = links.get("actor", {})
+        result.append({
+            "id": n.get("id"),
+            "reason": n.get("reason"),
+            "wpId": _id_from_href(resource.get("href")),
+            "wpSubject": resource.get("title"),
+            "actor": actor.get("title"),
+            "createdAt": n.get("createdAt"),
+        })
+    return result
+
+
 async def _build_ai_prompt(wp_id: int) -> str:
     """Busca a task completa no OpenProject e monta um super prompt autocontido.
 
@@ -281,6 +309,38 @@ async def _build_ai_prompt(wp_id: int) -> str:
         "5. Ao final, resuma o que foi feito e liste os arquivos alterados.",
     ]
     return "\n".join(parts)
+
+
+STORY_TYPE_KEYWORDS = ("história", "historia", "user story", "story")
+
+
+async def _find_nearest_story_id(wp_id: int) -> Optional[int]:
+    """Sobe a cadeia de parent a partir da tarefa até achar a história (ou
+    equivalente) mais próxima vinculada. Retorna None se não achar nenhuma.
+    """
+    current_id = wp_id
+    seen = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        try:
+            wp = await client.get_work_package(current_id)
+        except OpenProjectError:
+            return None
+        links = wp.get("_links", {})
+        wp_type = (links.get("type", {}).get("title") or "").lower()
+        if current_id != wp_id and any(k in wp_type for k in STORY_TYPE_KEYWORDS):
+            return current_id
+        current_id = _id_from_href(links.get("parent", {}).get("href"))
+    return None
+
+
+@app.get("/api/work_packages/{wp_id}/nearest_story")
+async def nearest_story(wp_id: int):
+    """Acha a história mais próxima vinculada (via parent) a essa tarefa."""
+    story_id = await _find_nearest_story_id(wp_id)
+    if story_id is None:
+        raise HTTPException(status_code=404, detail="Nenhuma história vinculada encontrada para essa tarefa.")
+    return {"storyId": story_id}
 
 
 @app.get("/api/work_packages/{wp_id}/ai_prompt")

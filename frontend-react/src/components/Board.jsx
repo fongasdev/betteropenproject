@@ -28,6 +28,8 @@ export default function Board({
   pingedIds,
   collapsedIds,
   onToggleCollapse,
+  collapsedColumns,
+  onToggleColumnCollapse,
   selectedStatuses,
   layout = "horizontal",
   resetToken = null,
@@ -156,6 +158,8 @@ export default function Board({
                 pingedIds={pingedIds}
                 collapsedIds={collapsedIds}
                 onToggleCollapse={onToggleCollapse}
+                collapsed={collapsedColumns?.has(status.name)}
+                onToggleColumnCollapse={onToggleColumnCollapse}
               />
             ))}
           </SortableContext>

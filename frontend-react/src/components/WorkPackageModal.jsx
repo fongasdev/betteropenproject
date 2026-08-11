@@ -14,6 +14,7 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
   const [loadingActivities, setLoadingActivities] = useState(true);
 
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
+  const [askingPromptSource, setAskingPromptSource] = useState(false);
   const [resolvingAi, setResolvingAi] = useState(false);
   const [aiAnswer, setAiAnswer] = useState("");
 
@@ -66,12 +67,25 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
     }
   }
 
-  async function copyAiPrompt() {
+  // Pergunta se o prompt deve ser montado com base na própria tarefa ou na
+  // história vinculada — dispara a busca real só depois da escolha.
+  async function copyAiPrompt(source) {
+    setAskingPromptSource(false);
     setGeneratingPrompt(true);
     try {
-      const { prompt } = await api.aiPrompt(wp.id);
+      let sourceId = wp.id;
+      if (source === "story") {
+        const { storyId } = await api.nearestStory(wp.id);
+        sourceId = storyId;
+      }
+      const { prompt } = await api.aiPrompt(sourceId);
       await copyToClipboard(prompt);
-      notify("Prompt copiado — cole no Claude Code", "success");
+      notify(
+        source === "story"
+          ? `Prompt copiado a partir da história #${sourceId} — cole no Claude Code`
+          : "Prompt copiado — cole no Claude Code",
+        "success"
+      );
     } catch (e) {
       notify(e.message, "error");
     } finally {
@@ -143,14 +157,34 @@ export default function WorkPackageModal({ wp, onClose, onDatesSaved, notify, op
                 ↗ Abrir no OpenProject
               </a>
             )}
-            <button
-              className="modal-open-op"
-              onClick={copyAiPrompt}
-              disabled={generatingPrompt}
-              title="Copiar prompt para colar no Claude Code"
-            >
-              {generatingPrompt ? "Gerando..." : "📋 Copiar prompt IA"}
-            </button>
+            <div className="ai-prompt-btn-wrap">
+              <button
+                className="modal-open-op"
+                onClick={() => setAskingPromptSource(true)}
+                disabled={generatingPrompt}
+                title="Copiar prompt para colar no Claude Code"
+              >
+                {generatingPrompt ? "Gerando..." : "📋 Copiar prompt IA"}
+              </button>
+
+              {askingPromptSource && (
+                <div className="ai-prompt-source-popover">
+                  <div className="ai-prompt-source-question">Montar prompt com base em:</div>
+                  <button className="ai-prompt-source-option" onClick={() => copyAiPrompt("task")}>
+                    Tarefa (esta)
+                  </button>
+                  <button className="ai-prompt-source-option" onClick={() => copyAiPrompt("story")}>
+                    História vinculada
+                  </button>
+                  <button
+                    className="ai-prompt-source-cancel"
+                    onClick={() => setAskingPromptSource(false)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               className="modal-open-op"
               onClick={resolveWithAi}

@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Board from "./components/Board.jsx";
 import WorkPackageModal from "./components/WorkPackageModal.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
+import PaletteSwitcher from "./components/PaletteSwitcher.jsx";
 import Toaster from "./components/Toaster.jsx";
 import NotificationCenter from "./components/NotificationCenter.jsx";
 import ProjectFilter from "./components/ProjectFilter.jsx";
 import StatusFilter from "./components/StatusFilter.jsx";
 import TypeFilter from "./components/TypeFilter.jsx";
+import ConfigVisibilityMenu, { loadVisibleConfigs } from "./components/ConfigVisibilityMenu.jsx";
 import { api } from "./api.js";
 import { initials, requestNotificationPermission, showBrowserNotification, playNotificationSound } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
@@ -25,6 +27,31 @@ function loadNotifications() {
     return [];
   }
 }
+
+// IDs de notificações nativas do OpenProject já trazidas pra cá — evita
+// renotificar a mesma coisa a cada poll enquanto ela seguir não lida lá.
+function loadSeenOpNotifications() {
+  try {
+    const raw = localStorage.getItem("op-seen-native-notifications");
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
+const OP_NOTIFICATION_REASON_LABEL = {
+  mentioned: "mencionou você",
+  assigned: "atribuiu a tarefa a você",
+  responsible: "te tornou responsável",
+  accountable: "te tornou responsável",
+  watched: "atualizou uma tarefa que você observa",
+  commented: "comentou",
+  dateAlert: "alerta de prazo",
+  overdue: "está atrasada",
+  processed: "atualizou o status",
+  scheduled: "agendou",
+  shared: "compartilhou algo com você",
+};
 
 function loadSelectedProjects() {
   try {
@@ -67,6 +94,15 @@ function loadLayout() {
   return v === "vertical" ? "vertical" : "horizontal";
 }
 
+function loadCollapsedColumns() {
+  try {
+    const raw = localStorage.getItem("op-collapsed-columns");
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
 export default function App() {
   const [me, setMe] = useState(null);
   const [statuses, setStatuses] = useState([]);
@@ -85,6 +121,8 @@ export default function App() {
   const [resetToken, setResetToken] = useState(null);
   const [notifications, setNotifications] = useState(loadNotifications);
   const [openProjectUrl, setOpenProjectUrl] = useState(null);
+  const [visibleConfigs, setVisibleConfigs] = useState(loadVisibleConfigs);
+  const [collapsedColumns, setCollapsedColumns] = useState(loadCollapsedColumns);
 
   useEffect(() => {
     api.config().then((c) => setOpenProjectUrl(c.openProjectUrl)).catch(() => {});
@@ -167,11 +205,28 @@ export default function App() {
     localStorage.setItem("op-layout", layout);
   }, [layout]);
 
+  useEffect(() => {
+    localStorage.setItem("op-visible-configs", JSON.stringify([...visibleConfigs]));
+  }, [visibleConfigs]);
+
+  useEffect(() => {
+    localStorage.setItem("op-collapsed-columns", JSON.stringify([...collapsedColumns]));
+  }, [collapsedColumns]);
+
   const toggleCollapse = useCallback((id) => {
     setCollapsedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleColumnCollapse = useCallback((statusName) => {
+    setCollapsedColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(statusName)) next.delete(statusName);
+      else next.add(statusName);
       return next;
     });
   }, []);
@@ -252,6 +307,43 @@ export default function App() {
 
   useTaskWatcher({ me, enabled: soundOn, onEvents: handleWatcherEvents });
 
+  // Puxa as notificações nativas do OpenProject (menções, atribuições,
+  // alertas de data etc. — o sininho de lá) e injeta as ainda não vistas
+  // aqui na central local, além do que o watcher já gera sozinho.
+  const seenOpNotifIdsRef = useRef(loadSeenOpNotifications());
+
+  const pollOpenProjectNotifications = useCallback(async () => {
+    let list;
+    try {
+      list = await api.notifications();
+    } catch (e) {
+      return; // falha pontual — tenta de novo no próximo ciclo
+    }
+    const unseen = list.filter((n) => !seenOpNotifIdsRef.current.has(n.id));
+    if (unseen.length === 0) return;
+
+    unseen.forEach((n) => {
+      seenOpNotifIdsRef.current.add(n.id);
+      const who = n.actor || "alguém";
+      const action = OP_NOTIFICATION_REASON_LABEL[n.reason] || "tem uma notificação para você";
+      const subject = n.wpSubject ? ` "${n.wpSubject}"` : "";
+      const message = `#${n.wpId ?? "?"}${subject} — ${who} ${action} (OpenProject)`;
+      notify(message, "info", { wpId: n.wpId ?? undefined });
+    });
+
+    localStorage.setItem(
+      "op-seen-native-notifications",
+      JSON.stringify([...seenOpNotifIdsRef.current].slice(-500))
+    );
+  }, [notify]);
+
+  useEffect(() => {
+    if (!me) return;
+    pollOpenProjectNotifications();
+    const id = setInterval(pollOpenProjectNotifications, 30_000);
+    return () => clearInterval(id);
+  }, [me, pollOpenProjectNotifications]);
+
   async function handleMove(wp, targetStatus) {
     const prevWps = workPackages;
     setWorkPackages((list) =>
@@ -281,6 +373,7 @@ export default function App() {
   // backlog, backlog pronto...) e expande todos os cards recolhidos.
   function handleResetView() {
     setCollapsedIds(new Set());
+    setCollapsedColumns(new Set());
     setResetToken(Date.now());
     notify("Visualização redefinida para o padrão", "info");
   }
@@ -298,83 +391,100 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="topbar-left">
-          <span className="logo">📋</span>
-          <h1>Better OpenProject</h1>
-        </div>
+        <ConfigVisibilityMenu visible={visibleConfigs} onChange={setVisibleConfigs} />
 
         <div className="topbar-right">
-          <ProjectFilter
-            projects={projectNames}
-            selected={selectedProjects}
-            onChange={setSelectedProjects}
-          />
+          {visibleConfigs.has("projectFilter") && (
+            <ProjectFilter
+              projects={projectNames}
+              selected={selectedProjects}
+              onChange={setSelectedProjects}
+            />
+          )}
 
-          <StatusFilter
-            statuses={statusNames}
-            selected={selectedStatuses}
-            onChange={setSelectedStatuses}
-          />
+          {visibleConfigs.has("statusFilter") && (
+            <StatusFilter
+              statuses={statusNames}
+              selected={selectedStatuses}
+              onChange={setSelectedStatuses}
+            />
+          )}
 
-          <TypeFilter
-            types={typeNames}
-            selected={selectedTypes}
-            onChange={setSelectedTypes}
-          />
+          {visibleConfigs.has("typeFilter") && (
+            <TypeFilter types={typeNames} selected={selectedTypes} onChange={setSelectedTypes} />
+          )}
 
-          <button
-            className="icon-btn"
-            onClick={() => setLayout((v) => (v === "horizontal" ? "vertical" : "horizontal"))}
-            title="Alternar layout do board"
-          >
-            {layout === "horizontal" ? "↕ Vertical" : "↔ Horizontal"}
-          </button>
+          {visibleConfigs.has("layoutToggle") && (
+            <button
+              className="icon-btn"
+              onClick={() => setLayout((v) => (v === "horizontal" ? "vertical" : "horizontal"))}
+              title="Alternar layout do board"
+            >
+              {layout === "horizontal" ? "↕ Vertical" : "↔ Horizontal"}
+            </button>
+          )}
 
-          <button
-            className="icon-btn"
-            onClick={handleResetView}
-            title="Restaura a ordem padrão das colunas e expande todos os cards"
-          >
-            ↺ Redefinir visualização
-          </button>
+          {visibleConfigs.has("resetView") && (
+            <button
+              className="icon-btn"
+              onClick={handleResetView}
+              title="Restaura a ordem padrão das colunas e expande todos os cards"
+            >
+              ↺ Redefinir visualização
+            </button>
+          )}
 
-          <label className="switch-label">
-            só as minhas
-            <span className="switch" data-on={onlyMe} onClick={() => setOnlyMe((v) => !v)}>
-              <span className="knob" />
-            </span>
-          </label>
+          {visibleConfigs.has("onlyMe") && (
+            <label className="switch-label">
+              só as minhas
+              <span className="switch" data-on={onlyMe} onClick={() => setOnlyMe((v) => !v)}>
+                <span className="knob" />
+              </span>
+            </label>
+          )}
 
-          <button
-            className="icon-btn"
-            onClick={() => setSoundOn((v) => !v)}
-            title="Ativar/desativar notificação sonora"
-          >
-            {soundOn ? "🔔" : "🔕"}
-          </button>
+          {visibleConfigs.has("soundToggle") && (
+            <button
+              className="icon-btn"
+              onClick={() => setSoundOn((v) => !v)}
+              title="Ativar/desativar notificação sonora"
+            >
+              {soundOn ? "🔔" : "🔕"}
+            </button>
+          )}
 
-          <NotificationCenter
-            notifications={notifications}
-            onMarkAllRead={markAllNotificationsRead}
-            onClear={clearNotifications}
-            onOpenWp={handleOpenFromNotification}
-          />
+          {visibleConfigs.has("notificationCenter") && (
+            <NotificationCenter
+              notifications={notifications}
+              onMarkAllRead={markAllNotificationsRead}
+              onClear={clearNotifications}
+              onOpenWp={handleOpenFromNotification}
+            />
+          )}
 
-          <button className="icon-btn" onClick={handleEnableNotifications} title="Pede permissão do navegador e ativa notificações">
-            Ativar notificações
-          </button>
+          {visibleConfigs.has("enableNotifications") && (
+            <button className="icon-btn" onClick={handleEnableNotifications} title="Pede permissão do navegador e ativa notificações">
+              Ativar notificações
+            </button>
+          )}
 
-          <button className="icon-btn" onClick={handleTestNotification} title="Dispara uma notificação de teste (som + browser)">
-            Testar
-          </button>
+          {visibleConfigs.has("testNotification") && (
+            <button className="icon-btn" onClick={handleTestNotification} title="Dispara uma notificação de teste (som + browser)">
+              Testar
+            </button>
+          )}
 
-          <button className="icon-btn" onClick={loadAll}>
-            ⟳ Recarregar
-          </button>
+          {visibleConfigs.has("reload") && (
+            <button className="icon-btn" onClick={loadAll}>
+              ⟳ Recarregar
+            </button>
+          )}
 
-          <ThemeToggle />
+          {visibleConfigs.has("palette") && <PaletteSwitcher />}
 
-          {me && (
+          {visibleConfigs.has("theme") && <ThemeToggle />}
+
+          {visibleConfigs.has("userChip") && me && (
             <div className="user-chip">
               <span className="avatar">{initials(me.name)}</span>
               <span>{me.name}</span>
@@ -397,6 +507,8 @@ export default function App() {
           pingedIds={pingedIds}
           collapsedIds={collapsedIds}
           onToggleCollapse={toggleCollapse}
+          collapsedColumns={collapsedColumns}
+          onToggleColumnCollapse={toggleColumnCollapse}
           selectedStatuses={selectedStatuses}
           layout={layout}
           resetToken={resetToken}
@@ -414,6 +526,8 @@ export default function App() {
       )}
 
       <Toaster toasts={toasts} />
+
+      <span className="app-brand-watermark">Better OpenProject</span>
     </div>
   );
 }

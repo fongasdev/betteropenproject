@@ -36,7 +36,10 @@ export default function Card({ wp, onOpen, pinged, collapsed, onToggleCollapse }
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.9 }}
       whileHover={{ y: -2 }}
-      transition={{ type: "spring", stiffness: 500, damping: 32 }}
+      transition={{
+        layout: { duration: 0.12, ease: "easeOut" },
+        default: { type: "spring", stiffness: 500, damping: 32 },
+      }}
       onClick={() => onOpen(wp)}
     >
       {pinged && <span className="ping-dot" title="Atualização recente de outra pessoa" />}
