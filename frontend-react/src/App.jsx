@@ -9,6 +9,7 @@ import ProjectFilter from "./components/ProjectFilter.jsx";
 import StatusFilter from "./components/StatusFilter.jsx";
 import TypeFilter from "./components/TypeFilter.jsx";
 import ConfigVisibilityMenu, { loadVisibleConfigs } from "./components/ConfigVisibilityMenu.jsx";
+import AgendaView from "./components/AgendaView.jsx";
 import { api } from "./api.js";
 import { initials, requestNotificationPermission, showBrowserNotification, playNotificationSound } from "./utils.js";
 import { useTaskWatcher } from "./useTaskWatcher.js";
@@ -128,6 +129,7 @@ export default function App() {
   const [visibleConfigs, setVisibleConfigs] = useState(loadVisibleConfigs);
   const [collapsedColumns, setCollapsedColumns] = useState(loadCollapsedColumns);
   const [hideEmptyColumns, setHideEmptyColumns] = useState(loadHideEmptyColumns);
+  const [activeView, setActiveView] = useState("board");
 
   useEffect(() => {
     api.config().then((c) => setOpenProjectUrl(c.openProjectUrl)).catch(() => {});
@@ -402,8 +404,23 @@ export default function App() {
       <header className="topbar">
         <ConfigVisibilityMenu visible={visibleConfigs} onChange={setVisibleConfigs} />
 
+        <div className="view-tabs">
+          <button
+            className={`view-tab${activeView === "board" ? " active" : ""}`}
+            onClick={() => setActiveView("board")}
+          >
+            Board
+          </button>
+          <button
+            className={`view-tab${activeView === "agenda" ? " active" : ""}`}
+            onClick={() => setActiveView("agenda")}
+          >
+            Agenda
+          </button>
+        </div>
+
         <div className="topbar-right">
-          {visibleConfigs.has("projectFilter") && (
+          {activeView === "board" && visibleConfigs.has("projectFilter") && (
             <ProjectFilter
               projects={projectNames}
               selected={selectedProjects}
@@ -411,7 +428,7 @@ export default function App() {
             />
           )}
 
-          {visibleConfigs.has("statusFilter") && (
+          {activeView === "board" && visibleConfigs.has("statusFilter") && (
             <StatusFilter
               statuses={statusNames}
               selected={selectedStatuses}
@@ -419,11 +436,11 @@ export default function App() {
             />
           )}
 
-          {visibleConfigs.has("typeFilter") && (
+          {activeView === "board" && visibleConfigs.has("typeFilter") && (
             <TypeFilter types={typeNames} selected={selectedTypes} onChange={setSelectedTypes} />
           )}
 
-          {visibleConfigs.has("layoutToggle") && (
+          {activeView === "board" && visibleConfigs.has("layoutToggle") && (
             <button
               className="icon-btn"
               onClick={() => setLayout((v) => (v === "horizontal" ? "vertical" : "horizontal"))}
@@ -433,7 +450,7 @@ export default function App() {
             </button>
           )}
 
-          {visibleConfigs.has("resetView") && (
+          {activeView === "board" && visibleConfigs.has("resetView") && (
             <button
               className="icon-btn"
               onClick={handleResetView}
@@ -443,7 +460,7 @@ export default function App() {
             </button>
           )}
 
-          {visibleConfigs.has("hideEmptyColumns") && (
+          {activeView === "board" && visibleConfigs.has("hideEmptyColumns") && (
             <label className="switch-label">
               ocultar colunas vazias
               <span
@@ -515,7 +532,9 @@ export default function App() {
         </div>
       </header>
 
-      {loading && workPackages.length === 0 ? (
+      {activeView === "agenda" ? (
+        <AgendaView workPackages={workPackages} />
+      ) : loading && workPackages.length === 0 ? (
         <div className="loading-wrap">
           <span className="spinner" />
           Carregando tasks...

@@ -70,6 +70,31 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ comment }),
     }).then(handle),
+
+  getSchedule: (start, end) =>
+    fetch(`${BASE}/schedule?start=${start}&end=${end}`).then(handle),
+
+  addScheduleEntry: (wpId, wpSubject, date, estimatedHours) =>
+    fetch(`${BASE}/schedule`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        wp_id: wpId,
+        wp_subject: wpSubject,
+        date,
+        estimated_hours: estimatedHours,
+      }),
+    }).then(handle),
+
+  updateScheduleEntry: (entryId, patch) =>
+    fetch(`${BASE}/schedule/${entryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then(handle),
+
+  deleteScheduleEntry: (entryId) =>
+    fetch(`${BASE}/schedule/${entryId}`, { method: "DELETE" }).then(handle),
 };
 
 export { ApiError };

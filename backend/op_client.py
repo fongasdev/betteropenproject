@@ -119,6 +119,57 @@ class OpenProjectClient:
             self._status_order_cache = {s["id"]: i for i, s in enumerate(elements)}
         return self._status_order_cache
 
+    async def _status_name(self, status_id: int) -> str:
+        data = await self.list_statuses()
+        for s in data.get("_embedded", {}).get("elements", []):
+            if s["id"] == status_id:
+                return s["name"]
+        return str(status_id)
+
+    async def _abort_move(
+        self,
+        wp_id: int,
+        current_status_id: int,
+        current_lock: int,
+        original_status_id: int,
+        reason: str,
+    ) -> None:
+        """Aborta uma movimentação de status em andamento.
+
+        Se algum hop intermediário já tiver sido aplicado de verdade no
+        OpenProject, tenta reverter pro status original antes de levantar o
+        erro — pra nunca deixar a tarefa "parada no meio do caminho" sem o
+        usuário saber. Se a reversão também não for permitida pelo workflow,
+        avisa claramente em qual status ela ficou, pra correção manual.
+        """
+        if current_status_id == original_status_id:
+            raise OpenProjectError(422, {"message": reason})
+
+        revert_ok = True
+        try:
+            await self.update_work_package(
+                wp_id,
+                current_lock,
+                {"_links": {"status": {"href": f"/api/v3/statuses/{original_status_id}"}}},
+            )
+        except OpenProjectError:
+            revert_ok = False
+
+        if revert_ok:
+            raise OpenProjectError(
+                422, {"message": f"{reason} A tarefa foi revertida automaticamente para o status original."}
+            )
+        stuck_name = await self._status_name(current_status_id)
+        raise OpenProjectError(
+            422,
+            {
+                "message": (
+                    f"{reason} Não foi possível reverter automaticamente — a tarefa ficou parada "
+                    f"no status intermediário \"{stuck_name}\". Corrija manualmente no OpenProject."
+                )
+            },
+        )
+
     async def move_work_package_status(
         self, wp_id: int, lock_version: int, target_status_id: int, max_hops: int = 15
     ) -> dict:
@@ -131,12 +182,18 @@ class OpenProjectClient:
         (list_available_statuses) e escolhe a que mais aproxima do destino
         segundo a ordem do pipeline. Se a transição direta já for permitida,
         vai direto — nenhum hop extra é feito nesse caso.
+
+        Se em algum passo intermediário não houver transição válida em
+        direção ao destino, a movimentação inteira é abortada — nunca
+        deixamos a tarefa parada num status intermediário sem avisar (ver
+        `_abort_move`), que tenta reverter pro status original.
         """
         order = await self._status_order()
         target_idx = order.get(target_status_id)
 
         wp = await self.get_work_package(wp_id)
-        current_status_id = _id_from_href(wp.get("_links", {}).get("status", {}).get("href"))
+        original_status_id = _id_from_href(wp.get("_links", {}).get("status", {}).get("href"))
+        current_status_id = original_status_id
         current_lock = wp.get("lockVersion", lock_version)
 
         if current_status_id == target_status_id:
@@ -170,15 +227,16 @@ class OpenProjectClient:
                     candidates.append((a_idx, a))
 
             if not candidates:
-                raise OpenProjectError(
-                    422,
-                    {
-                        "message": (
-                            f"Não foi possível encontrar um caminho de transição até o status "
-                            f"{target_status_id}. Transições permitidas a partir do status atual: "
-                            f"{[a['name'] for a in allowed]}."
-                        )
-                    },
+                await self._abort_move(
+                    wp_id,
+                    current_status_id,
+                    current_lock,
+                    original_status_id,
+                    (
+                        f"Não foi possível encontrar um caminho de transição até o status "
+                        f"{target_status_id}. Transições permitidas a partir do status atual: "
+                        f"{[a['name'] for a in allowed]}."
+                    ),
                 )
 
             # Se target_idx > current_idx, queremos o maior a_idx (mais perto do destino);
@@ -195,9 +253,12 @@ class OpenProjectClient:
             current_lock = updated["lockVersion"]
             current_status_id = next_status["id"]
 
-        raise OpenProjectError(
-            422,
-            {"message": f"Excedido o número máximo de {max_hops} passos ao tentar chegar ao status {target_status_id}."},
+        await self._abort_move(
+            wp_id,
+            current_status_id,
+            current_lock,
+            original_status_id,
+            f"Excedido o número máximo de {max_hops} passos ao tentar chegar ao status {target_status_id}.",
         )
 
     # ---- Comentários / atividades ----

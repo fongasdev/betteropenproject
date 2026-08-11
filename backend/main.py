@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .op_client import client, OpenProjectError, OPENPROJECT_URL
+from . import schedule_db
 
 app = FastAPI(title="Better OpenProject")
 
@@ -391,6 +392,45 @@ async def add_comment(wp_id: int, body: CommentBody):
         return await client.add_comment(wp_id, body.comment)
     except OpenProjectError as e:
         _err(e)
+
+
+class ScheduleEntryCreate(BaseModel):
+    wp_id: int
+    wp_subject: str
+    date: str  # YYYY-MM-DD
+    estimated_hours: float
+
+
+class ScheduleEntryUpdate(BaseModel):
+    date: Optional[str] = None
+    estimated_hours: Optional[float] = None
+    position: Optional[int] = None
+
+
+@app.get("/api/schedule")
+async def get_schedule(start: Optional[str] = None, end: Optional[str] = None):
+    return schedule_db.list_entries(start, end)
+
+
+@app.post("/api/schedule")
+async def add_schedule_entry(body: ScheduleEntryCreate):
+    return schedule_db.create_entry(body.wp_id, body.wp_subject, body.date, body.estimated_hours)
+
+
+@app.patch("/api/schedule/{entry_id}")
+async def patch_schedule_entry(entry_id: int, body: ScheduleEntryUpdate):
+    entry = schedule_db.update_entry(
+        entry_id, date=body.date, estimated_hours=body.estimated_hours, position=body.position
+    )
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Entrada não encontrada")
+    return entry
+
+
+@app.delete("/api/schedule/{entry_id}")
+async def remove_schedule_entry(entry_id: int):
+    schedule_db.delete_entry(entry_id)
+    return {"ok": True}
 
 
 @app.on_event("shutdown")
