@@ -9,14 +9,15 @@ from pathlib import Path
 from typing import Optional
 
 import anthropic
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .op_client import client, OpenProjectError, OPENPROJECT_URL
+from .op_client import OpenProjectClient, OpenProjectError, OPENPROJECT_URL
 from . import schedule_db
+from . import sessions
 
 app = FastAPI(title="SmartFlow")
 
@@ -54,18 +55,55 @@ async def config():
     return {"openProjectUrl": OPENPROJECT_URL}
 
 
-@app.get("/api/me")
-async def me():
+async def get_client(session: sessions.Session = Depends(sessions.get_session)) -> OpenProjectClient:
+    return session.client
+
+
+class LoginBody(BaseModel):
+    apiKey: str
+
+
+@app.post("/api/login")
+async def login(body: LoginBody, response: Response, request: Request):
     try:
-        return await client.me()
+        token, user = await sessions.login(body.apiKey)
+    except OpenProjectError as e:
+        raise HTTPException(
+            status_code=401 if e.status_code in (401, 403) else (e.status_code if e.status_code < 500 else 502),
+            detail="API key inválida ou sem acesso ao OpenProject." if e.status_code in (401, 403) else e.detail,
+        )
+    response.set_cookie(
+        sessions.SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        max_age=sessions.SESSION_TTL_SECONDS,
+        path="/",
+    )
+    return user
+
+
+@app.post("/api/logout")
+async def logout(response: Response):
+    # Sessão é stateless (cookie criptografado) — nada pra derrubar no
+    # servidor, só apagar o cookie do navegador.
+    response.delete_cookie(sessions.SESSION_COOKIE, path="/")
+    return {"ok": True}
+
+
+@app.get("/api/me")
+async def me(oc: OpenProjectClient = Depends(get_client)):
+    try:
+        return await oc.me()
     except OpenProjectError as e:
         _err(e)
 
 
 @app.get("/api/statuses")
-async def statuses():
+async def statuses(oc: OpenProjectClient = Depends(get_client)):
     try:
-        data = await client.list_statuses()
+        data = await oc.list_statuses()
         return data.get("_embedded", {}).get("elements", [])
     except OpenProjectError as e:
         _err(e)
@@ -96,13 +134,13 @@ def _serialize_wp(wp: dict) -> dict:
 
 
 @app.get("/api/work_packages")
-async def work_packages(only_me: bool = True):
+async def work_packages(only_me: bool = True, oc: OpenProjectClient = Depends(get_client)):
     try:
         assignee = None
         if only_me:
-            user = await client.me()
+            user = await oc.me()
             assignee = str(user["id"])
-        data = await client.list_work_packages(assignee=assignee)
+        data = await oc.list_work_packages(assignee=assignee)
         elements = data.get("_embedded", {}).get("elements", [])
         return [_serialize_wp(wp) for wp in elements]
     except OpenProjectError as e:
@@ -110,20 +148,20 @@ async def work_packages(only_me: bool = True):
 
 
 @app.get("/api/work_packages/{wp_id}")
-async def get_work_package_detail(wp_id: int):
+async def get_work_package_detail(wp_id: int, oc: OpenProjectClient = Depends(get_client)):
     """Retorna uma task avulsa (usado pra abrir a task relacionada/pai a
     partir do card de outra, sem depender da lista já carregada)."""
     try:
-        wp = await client.get_work_package(wp_id)
+        wp = await oc.get_work_package(wp_id)
         return _serialize_wp(wp)
     except OpenProjectError as e:
         _err(e)
 
 
 @app.get("/api/work_packages/{wp_id}/available_statuses")
-async def available_statuses(wp_id: int, lock_version: int):
+async def available_statuses(wp_id: int, lock_version: int, oc: OpenProjectClient = Depends(get_client)):
     try:
-        return await client.list_available_statuses(wp_id, lock_version)
+        return await oc.list_available_statuses(wp_id, lock_version)
     except OpenProjectError as e:
         _err(e)
 
@@ -134,7 +172,7 @@ class StatusChange(BaseModel):
 
 
 @app.patch("/api/work_packages/{wp_id}/status")
-async def change_status(wp_id: int, body: StatusChange):
+async def change_status(wp_id: int, body: StatusChange, oc: OpenProjectClient = Depends(get_client)):
     """Move o work package para o status pedido pelo front (ex.: drag&drop no board).
 
     Quando o workflow do OpenProject não permite o salto direto, avança
@@ -143,7 +181,7 @@ async def change_status(wp_id: int, body: StatusChange):
     final desejado.
     """
     try:
-        updated = await client.move_work_package_status(wp_id, body.lockVersion, body.statusId)
+        updated = await oc.move_work_package_status(wp_id, body.lockVersion, body.statusId)
         return updated
     except OpenProjectError as e:
         detail = e.detail
@@ -158,23 +196,23 @@ class DatesChange(BaseModel):
 
 
 @app.patch("/api/work_packages/{wp_id}/dates")
-async def change_dates(wp_id: int, body: DatesChange):
+async def change_dates(wp_id: int, body: DatesChange, oc: OpenProjectClient = Depends(get_client)):
     try:
         payload = {}
         if body.startDate is not None:
             payload["startDate"] = body.startDate
         if body.dueDate is not None:
             payload["dueDate"] = body.dueDate
-        updated = await client.update_work_package(wp_id, body.lockVersion, payload)
+        updated = await oc.update_work_package(wp_id, body.lockVersion, payload)
         return updated
     except OpenProjectError as e:
         _err(e)
 
 
 @app.get("/api/work_packages/{wp_id}/activities")
-async def activities(wp_id: int):
+async def activities(wp_id: int, oc: OpenProjectClient = Depends(get_client)):
     try:
-        data = await client.list_activities(wp_id)
+        data = await oc.list_activities(wp_id)
         elements = data.get("_embedded", {}).get("elements", [])
         parsed = []
         for a in elements:
@@ -195,7 +233,7 @@ async def activities(wp_id: int):
         if missing_ids:
             import asyncio
 
-            names = await asyncio.gather(*(client.user_name(uid) for uid in missing_ids))
+            names = await asyncio.gather(*(oc.user_name(uid) for uid in missing_ids))
             name_by_id = dict(zip(missing_ids, names))
             for p in parsed:
                 if p["userId"] in name_by_id:
@@ -206,12 +244,12 @@ async def activities(wp_id: int):
 
 
 @app.get("/api/notifications")
-async def notifications():
+async def notifications(oc: OpenProjectClient = Depends(get_client)):
     """Notificações não lidas do usuário no OpenProject (bell nativo dele) —
     pra exibir junto das notificações geradas aqui no watcher local.
     """
     try:
-        data = await client.list_notifications()
+        data = await oc.list_notifications()
     except OpenProjectError as e:
         _err(e)
     elements = data.get("_embedded", {}).get("elements", [])
@@ -233,7 +271,7 @@ async def notifications():
     return result
 
 
-async def _build_ai_prompt(wp_id: int) -> str:
+async def _build_ai_prompt(wp_id: int, oc: OpenProjectClient) -> str:
     """Busca a task completa no OpenProject e monta um super prompt autocontido.
 
     A IA que recebe esse prompt não tem acesso ao OpenProject (nem ao link da
@@ -241,8 +279,8 @@ async def _build_ai_prompt(wp_id: int) -> str:
     metadados, comentários com autor/data) e embutimos no texto.
     """
     try:
-        wp = await client.get_work_package(wp_id)
-        activities_data = await client.list_activities(wp_id)
+        wp = await oc.get_work_package(wp_id)
+        activities_data = await oc.list_activities(wp_id)
     except OpenProjectError as e:
         _err(e)
 
@@ -273,7 +311,7 @@ async def _build_ai_prompt(wp_id: int) -> str:
     if missing_ids:
         import asyncio
 
-        names = await asyncio.gather(*(client.user_name(uid) for uid in missing_ids))
+        names = await asyncio.gather(*(oc.user_name(uid) for uid in missing_ids))
         name_by_id = dict(zip(missing_ids, names))
 
     comments = []
@@ -330,7 +368,7 @@ async def _build_ai_prompt(wp_id: int) -> str:
 STORY_TYPE_KEYWORDS = ("história", "historia", "user story", "story")
 
 
-async def _find_nearest_story_id(wp_id: int) -> Optional[int]:
+async def _find_nearest_story_id(wp_id: int, oc: OpenProjectClient) -> Optional[int]:
     """Sobe a cadeia de parent a partir da tarefa até achar a história (ou
     equivalente) mais próxima vinculada. Retorna None se não achar nenhuma.
     """
@@ -339,7 +377,7 @@ async def _find_nearest_story_id(wp_id: int) -> Optional[int]:
     while current_id and current_id not in seen:
         seen.add(current_id)
         try:
-            wp = await client.get_work_package(current_id)
+            wp = await oc.get_work_package(current_id)
         except OpenProjectError:
             return None
         links = wp.get("_links", {})
@@ -351,29 +389,29 @@ async def _find_nearest_story_id(wp_id: int) -> Optional[int]:
 
 
 @app.get("/api/work_packages/{wp_id}/nearest_story")
-async def nearest_story(wp_id: int):
+async def nearest_story(wp_id: int, oc: OpenProjectClient = Depends(get_client)):
     """Acha a história mais próxima vinculada (via parent) a essa tarefa."""
-    story_id = await _find_nearest_story_id(wp_id)
+    story_id = await _find_nearest_story_id(wp_id, oc)
     if story_id is None:
         raise HTTPException(status_code=404, detail="Nenhuma história vinculada encontrada para essa tarefa.")
     return {"storyId": story_id}
 
 
 @app.get("/api/work_packages/{wp_id}/ai_prompt")
-async def ai_prompt(wp_id: int):
+async def ai_prompt(wp_id: int, oc: OpenProjectClient = Depends(get_client)):
     """Monta um prompt pronto pra colar no Claude Code resolver a task."""
-    return {"prompt": await _build_ai_prompt(wp_id)}
+    return {"prompt": await _build_ai_prompt(wp_id, oc)}
 
 
 @app.post("/api/work_packages/{wp_id}/ai_resolve")
-async def ai_resolve(wp_id: int):
+async def ai_resolve(wp_id: int, oc: OpenProjectClient = Depends(get_client)):
     """Manda a task direto pra API da Claude e devolve a resposta do modelo."""
     if anthropic_client is None:
         raise HTTPException(
             status_code=503,
             detail="ANTHROPIC_API_KEY não configurada no backend.",
         )
-    prompt = await _build_ai_prompt(wp_id)
+    prompt = await _build_ai_prompt(wp_id, oc)
     try:
         message = await anthropic_client.messages.create(
             model=ANTHROPIC_MODEL,
@@ -388,9 +426,9 @@ async def ai_resolve(wp_id: int):
 
 
 @app.get("/api/projects")
-async def projects():
+async def projects(oc: OpenProjectClient = Depends(get_client)):
     try:
-        data = await client.list_projects()
+        data = await oc.list_projects()
         elements = data.get("_embedded", {}).get("elements", [])
         return [{"id": p["id"], "name": p.get("name")} for p in elements]
     except OpenProjectError as e:
@@ -402,9 +440,9 @@ class CommentBody(BaseModel):
 
 
 @app.post("/api/work_packages/{wp_id}/comments")
-async def add_comment(wp_id: int, body: CommentBody):
+async def add_comment(wp_id: int, body: CommentBody, oc: OpenProjectClient = Depends(get_client)):
     try:
-        return await client.add_comment(wp_id, body.comment)
+        return await oc.add_comment(wp_id, body.comment)
     except OpenProjectError as e:
         _err(e)
 
@@ -423,23 +461,37 @@ class ScheduleEntryUpdate(BaseModel):
 
 
 @app.get("/api/schedule")
-async def get_schedule(start: Optional[str] = None, end: Optional[str] = None):
-    return schedule_db.list_entries(start, end)
+async def get_schedule(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    session: sessions.Session = Depends(sessions.get_session),
+):
+    return await schedule_db.list_entries(session.user["id"], start, end)
 
 
 @app.post("/api/schedule")
-async def add_schedule_entry(body: ScheduleEntryCreate):
+async def add_schedule_entry(
+    body: ScheduleEntryCreate, session: sessions.Session = Depends(sessions.get_session)
+):
     if body.date < date.today().isoformat():
         raise HTTPException(status_code=400, detail="Não é possível agendar para uma data passada")
-    return schedule_db.create_entry(body.wp_id, body.wp_subject, body.date, body.estimated_hours)
+    return await schedule_db.create_entry(
+        session.user["id"], body.wp_id, body.wp_subject, body.date, body.estimated_hours
+    )
 
 
 @app.patch("/api/schedule/{entry_id}")
-async def patch_schedule_entry(entry_id: int, body: ScheduleEntryUpdate):
+async def patch_schedule_entry(
+    entry_id: int, body: ScheduleEntryUpdate, session: sessions.Session = Depends(sessions.get_session)
+):
     if body.date is not None and body.date < date.today().isoformat():
         raise HTTPException(status_code=400, detail="Não é possível agendar para uma data passada")
-    entry = schedule_db.update_entry(
-        entry_id, date=body.date, estimated_hours=body.estimated_hours, position=body.position
+    entry = await schedule_db.update_entry(
+        session.user["id"],
+        entry_id,
+        date=body.date,
+        estimated_hours=body.estimated_hours,
+        position=body.position,
     )
     if entry is None:
         raise HTTPException(status_code=404, detail="Entrada não encontrada")
@@ -447,20 +499,25 @@ async def patch_schedule_entry(entry_id: int, body: ScheduleEntryUpdate):
 
 
 @app.delete("/api/schedule/by_wp/{wp_id}")
-async def remove_schedule_by_wp(wp_id: int):
-    schedule_db.delete_by_wp_id(wp_id)
+async def remove_schedule_by_wp(wp_id: int, session: sessions.Session = Depends(sessions.get_session)):
+    await schedule_db.delete_by_wp_id(session.user["id"], wp_id)
     return {"ok": True}
 
 
 @app.delete("/api/schedule/{entry_id}")
-async def remove_schedule_entry(entry_id: int):
-    schedule_db.delete_entry(entry_id)
+async def remove_schedule_entry(entry_id: int, session: sessions.Session = Depends(sessions.get_session)):
+    await schedule_db.delete_entry(session.user["id"], entry_id)
     return {"ok": True}
+
+
+@app.on_event("startup")
+async def startup():
+    await schedule_db.init_pool()
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    await client.aclose()
+    await schedule_db.close_pool()
 
 
 # Frontend estático — build do React (vite build gera dist/assets/*),

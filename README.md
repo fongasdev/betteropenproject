@@ -1,40 +1,55 @@
 # SmartFlow
 
 Frontend próprio (Kanban com drag-and-drop) para suas tasks no OpenProject,
-usando a API v3 via API key. Frontend em **React** (Vite + dnd-kit +
-framer-motion), backend em **FastAPI**, que atua como proxy simplificado
-para a API do OpenProject.
+usando a API v3. Frontend em **React** (Vite + dnd-kit + framer-motion),
+backend em **FastAPI**, que atua como proxy simplificado para a API do
+OpenProject.
+
+Cada pessoa loga no SmartFlow com a **própria API key** do OpenProject (tela
+de login) — não existe mais uma chave única compartilhada configurada no
+servidor. Isso faz o SmartFlow enxergar exatamente o que a conta de cada
+usuário enxerga no OpenProject (permissões/visibilidade reais, por pessoa).
 
 ## Requisitos
 
 - Python 3.10+
 - Node.js 18+ (para buildar/rodar o frontend React)
-- Acesso a uma instância do OpenProject + uma API key
+- Acesso a uma instância do OpenProject (cada usuário gera sua própria API
+  key em **My account → Access tokens → API key**, dentro do próprio
+  OpenProject — ou acessando `/my/access_token` direto)
 
 ## Configuração (`.env`)
 
-O backend lê credenciais de um arquivo `.env` na raiz do projeto (não
+O backend lê configuração de um arquivo `.env` na raiz do projeto (não
 versionado — já está no `.gitignore`). Use o `.env.example` como base:
 
 ```bash
 cp .env.example .env
 ```
 
-E preencha as duas variáveis:
+E preencha:
 
 ```
 OPENPROJECT_URL=https://openproject.smartbr.com
-OPENPROJECT_API_KEY=coloque_sua_api_key_aqui
 ```
 
-- `OPENPROJECT_URL`: URL base da sua instância (sem `/` no final).
-- `OPENPROJECT_API_KEY`: gere em **My account → Access tokens → API key**,
-  dentro do próprio OpenProject. É usada como senha no Basic Auth (usuário
-  fixo `apikey`), veja `backend/op_client.py`.
+- `OPENPROJECT_URL`: URL base da instância do OpenProject (sem `/` no
+  final) — a mesma pra todo mundo, usada só pra saber com qual servidor
+  falar. A API key em si **não** fica no `.env`: cada sessão de login carrega
+  a sua própria, criptografada dentro do cookie do próprio navegador
+  (`backend/sessions.py`), nunca em disco/banco no servidor.
+- `DATABASE_URL`: connection string do Postgres onde fica a agenda (uma
+  tabela `schedule_entries`, isolada por `user_id`). Provider gerenciado
+  (Neon/Supabase/Railway Postgres) fornece pronto — não precisa instalar
+  Postgres localmente.
+- `SESSION_SECRET_KEY`: chave Fernet que criptografa o cookie de sessão. Gere
+  com `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+  Trocar essa chave em produção derruba todas as sessões ativas (todo mundo
+  precisa logar de novo).
 
-Sem essas duas variáveis o backend falha ao iniciar (`os.environ[...]`
-levanta `KeyError` de propósito, pra não subir silenciosamente sem
-credenciais).
+Sem `OPENPROJECT_URL`, `DATABASE_URL` ou `SESSION_SECRET_KEY` o backend falha
+ao iniciar (`os.environ[...]` levanta `KeyError` de propósito, pra não subir
+silenciosamente sem configuração).
 
 Opcionalmente, pra usar o botão **"Resolver com IA"** (manda a task direto
 pra API da Claude):
@@ -132,6 +147,28 @@ Sobe o backend com `--reload` na 8811 e o Vite dev server na 5173 (com proxy
 de `/api` para o backend). Abra **http://127.0.0.1:5173** — mudanças no React
 aparecem na hora.
 
+## Deploy (produção remota)
+
+O app roda como **um serviço só**, via `Dockerfile` na raiz — backend
+FastAPI servindo a API e o build do React no mesmo host/porta (same-origin:
+sem CORS cross-site, cookie de sessão funciona igual ao ambiente local).
+
+1. Suba um Postgres gerenciado (Neon, Supabase, ou o addon Postgres do
+   próprio host de deploy) e pegue a `DATABASE_URL`.
+2. Gere `SESSION_SECRET_KEY` (comando na seção de Configuração acima).
+3. Escolha um host que builda a partir de `Dockerfile` (Railway, Render, Fly.io
+   — qualquer um funciona igual, é só apontar pro repo/Dockerfile).
+4. Configure as env vars no host: `OPENPROJECT_URL`, `DATABASE_URL`,
+   `SESSION_SECRET_KEY`, e opcionalmente `ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL`.
+5. Deploy. O container builda o frontend (stage Node) e sobe o backend
+   (`uvicorn`) na porta que o host injetar via `$PORT`.
+
+Vercel fica de fora dessa: o app não é uma SPA + functions serverless
+separadas — é um backend com estado de sessão por request, e Vercel Python
+functions têm limite curto de execução e não foram desenhadas pra esse
+formato. Um host que roda container Python normal (Railway/Render/Fly)
+encaixa direto sem reescrever nada.
+
 ## Notificações do navegador mostrando IP em vez do nome
 
 Acessando por `http://127.0.0.1:8811`, o Chrome/Edge mostra `127.0.0.1:8811`
@@ -186,11 +223,18 @@ CORS do backend já está com `allow_origins=["*"]`
 ## Estrutura
 
 - `backend/op_client.py` — cliente HTTP fino para a API v3 do OpenProject
-  (Basic Auth: usuário `apikey`, senha = a API key).
+  (Basic Auth: usuário `apikey`, senha = a API key pessoal de quem logou).
+- `backend/sessions.py` — sessão de login: valida a API key digitada contra
+  `/users/me` e devolve um cookie httpOnly criptografado (Fernet) com a key +
+  dados do usuário — stateless, nenhum estado guardado em memória do
+  servidor, funciona igual com uma ou várias instâncias do backend.
   - Transições de status válidas vêm do endpoint `/work_packages/{id}/form`
     (respeita o workflow por papel de usuário).
   - `move_work_package_status` faz a transição em múltiplos passos quando o
     salto direto não é permitido pelo workflow.
+- `backend/schedule_db.py` — persistência (Postgres/asyncpg) da Agenda,
+  tabela `schedule_entries` isolada por `user_id`: cada pessoa só lê/edita a
+  própria.
 - `backend/main.py` — FastAPI expondo endpoints simplificados
   (`/api/work_packages`, `/api/work_packages/{id}/status`,
   `/api/work_packages/{id}/dates`, `/api/work_packages/{id}/comments`, etc.)

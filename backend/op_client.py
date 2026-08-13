@@ -9,7 +9,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENPROJECT_URL = os.environ["OPENPROJECT_URL"].rstrip("/")
-API_KEY = os.environ["OPENPROJECT_API_KEY"]
 
 
 def _id_from_href(href: Optional[str]) -> Optional[int]:
@@ -29,12 +28,15 @@ class OpenProjectError(Exception):
 
 
 class OpenProjectClient:
-    """Client fino sobre a API v3 (Basic Auth: usuário 'apikey', senha = API key)."""
+    """Client fino sobre a API v3 (Basic Auth: usuário 'apikey', senha = API key
+    pessoal do usuário logado — cada sessão do SmartFlow tem a sua própria
+    instância, autenticada com a key que a pessoa colou na tela de login).
+    """
 
-    def __init__(self):
+    def __init__(self, api_key: str):
         self._client = httpx.AsyncClient(
             base_url=f"{OPENPROJECT_URL}/api/v3",
-            auth=("apikey", API_KEY),
+            auth=("apikey", api_key),
             headers={"Content-Type": "application/json"},
             timeout=30.0,
         )
@@ -178,87 +180,93 @@ class OpenProjectClient:
         permitido (ex.: Nova -> Desenvolvendo precisa passar por Backlog,
         Backlog-Pronto, Tarefa-Pronta antes).
 
-        Em cada passo, consulta as transições realmente permitidas
-        (list_available_statuses) e escolhe a que mais aproxima do destino
-        segundo a ordem do pipeline. Se a transição direta já for permitida,
-        vai direto — nenhum hop extra é feito nesse caso.
+        Faz uma busca real (não só heurística) sobre o grafo de transições:
+        em cada passo, tenta o candidato mais promissor (mais perto do
+        destino pela ordem do pipeline); se esse ramo empacar mais na
+        frente, desfaz o hop (volta pro status anterior) e tenta o próximo
+        candidato, em vez de desistir na primeira tentativa. Isso é
+        necessário porque estados como "Pausado"/"Rejeitada" só voltam pra
+        "Nova" — mais distante do destino pela ordem do pipeline do que
+        outros candidatos que na prática são becos sem saída (ex.: uma
+        transição direta Pausado -> Desenvolvendo não existe; o caminho
+        certo é Pausado -> Nova -> Backlog -> ... -> Desenvolvendo, mesmo
+        "Nova" parecendo pior candidato só pela distância de índice).
 
-        Se em algum passo intermediário não houver transição válida em
-        direção ao destino, a movimentação inteira é abortada — nunca
-        deixamos a tarefa parada num status intermediário sem avisar (ver
-        `_abort_move`), que tenta reverter pro status original.
+        Se nenhum caminho for encontrado dentro de `max_hops` tentativas, a
+        movimentação inteira é abortada e a tarefa é revertida pro status
+        original (ver `_abort_move`) — nunca fica parada num intermediário
+        sem avisar.
         """
         order = await self._status_order()
         target_idx = order.get(target_status_id)
 
         wp = await self.get_work_package(wp_id)
         original_status_id = _id_from_href(wp.get("_links", {}).get("status", {}).get("href"))
-        current_status_id = original_status_id
-        current_lock = wp.get("lockVersion", lock_version)
 
-        if current_status_id == target_status_id:
+        if original_status_id == target_status_id:
             return wp
 
-        for _ in range(max_hops):
-            allowed = await self.list_available_statuses(wp_id, current_lock)
-            allowed_ids = {a["id"] for a in allowed}
+        visited = {original_status_id}
+        hops_left = [max_hops]
 
-            if target_status_id in allowed_ids:
+        def candidate_key(a: dict) -> tuple:
+            a_idx = order.get(a["id"])
+            dist = abs(a_idx - target_idx) if a_idx is not None and target_idx is not None else 999
+            return (dist, a_idx if a_idx is not None else 999)
+
+        async def search(current_wp: dict):
+            current_id = _id_from_href(current_wp.get("_links", {}).get("status", {}).get("href"))
+            allowed = await self.list_available_statuses(wp_id, current_wp["lockVersion"])
+            if any(a["id"] == target_status_id for a in allowed):
                 return await self.update_work_package(
                     wp_id,
-                    current_lock,
+                    current_wp["lockVersion"],
                     {"_links": {"status": {"href": f"/api/v3/statuses/{target_status_id}"}}},
                 )
 
-            # Escolhe, entre as transições permitidas, a que mais aproxima do
-            # destino sem passar por ele (evita ultrapassar ou entrar em
-            # ramais como Rejeitada/Pausado que não têm índice conhecido).
-            current_idx = order.get(current_status_id)
-            candidates = []
-            for a in allowed:
-                if a["id"] == current_status_id:
-                    continue
-                a_idx = order.get(a["id"])
-                if a_idx is None or target_idx is None or current_idx is None:
-                    continue
-                if target_idx > current_idx and current_idx < a_idx <= target_idx:
-                    candidates.append((a_idx, a))
-                elif target_idx < current_idx and target_idx <= a_idx < current_idx:
-                    candidates.append((a_idx, a))
-
-            if not candidates:
-                await self._abort_move(
-                    wp_id,
-                    current_status_id,
-                    current_lock,
-                    original_status_id,
-                    (
-                        f"Não foi possível encontrar um caminho de transição até o status "
-                        f"{target_status_id}. Transições permitidas a partir do status atual: "
-                        f"{[a['name'] for a in allowed]}."
-                    ),
-                )
-
-            # Se target_idx > current_idx, queremos o maior a_idx (mais perto do destino);
-            # senão, o menor a_idx.
-            reverse = target_idx is not None and current_idx is not None and target_idx > current_idx
-            candidates.sort(key=lambda c: c[0], reverse=reverse)
-            _, next_status = candidates[0]
-
-            updated = await self.update_work_package(
-                wp_id,
-                current_lock,
-                {"_links": {"status": {"href": f"/api/v3/statuses/{next_status['id']}"}}},
+            candidates = sorted(
+                (a for a in allowed if a["id"] not in visited), key=candidate_key
             )
-            current_lock = updated["lockVersion"]
-            current_status_id = next_status["id"]
+            for cand in candidates:
+                if hops_left[0] <= 0:
+                    return None
+                hops_left[0] -= 1
+                visited.add(cand["id"])
+                moved = await self.update_work_package(
+                    wp_id,
+                    current_wp["lockVersion"],
+                    {"_links": {"status": {"href": f"/api/v3/statuses/{cand['id']}"}}},
+                )
+                result = await search(moved)
+                if result is not None:
+                    return result
+                # Ramo sem saída — volta pro status anterior antes de tentar o
+                # próximo candidato (senão a tarefa fica largada no beco sem saída).
+                try:
+                    reverted = await self.update_work_package(
+                        wp_id,
+                        moved["lockVersion"],
+                        {"_links": {"status": {"href": f"/api/v3/statuses/{current_id}"}}},
+                    )
+                    current_wp = reverted
+                except OpenProjectError:
+                    return None  # não deu pra voltar — a task ficou no ramo sem saída
+            return None
 
+        result = await search(wp)
+        if result is not None:
+            return result
+
+        # Busca falhou — confere onde a tarefa realmente ficou (pode já ter
+        # voltado pro original via os backtracks acima) e aborta/avisa.
+        final_wp = await self.get_work_package(wp_id)
+        final_status_id = _id_from_href(final_wp.get("_links", {}).get("status", {}).get("href"))
         await self._abort_move(
             wp_id,
-            current_status_id,
-            current_lock,
+            final_status_id,
+            final_wp["lockVersion"],
             original_status_id,
-            f"Excedido o número máximo de {max_hops} passos ao tentar chegar ao status {target_status_id}.",
+            f"Não foi possível encontrar um caminho de transição até o status {target_status_id}.",
         )
 
     # ---- Comentários / atividades ----
@@ -302,6 +310,3 @@ class OpenProjectClient:
             f"/work_packages/{wp_id}/activities",
             json={"comment": {"raw": comment}},
         )
-
-
-client = OpenProjectClient()

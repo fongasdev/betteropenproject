@@ -59,6 +59,13 @@ async function loadActivities(id, { force = false } = {}) {
   );
 }
 
+// Popula o cache com uma task que já foi carregada em outro lugar (ex.: card
+// do board), evitando um fetch redundante ao abrir a mesma task numa aba.
+function primeWorkPackage(data) {
+  if (!data?.id) return;
+  wpStore.set(data.id, { data, fetchedAt: Date.now() });
+}
+
 // Descarta o cache de uma task (usado quando o watcher percebe que ela mudou
 // de status/ganhou comentário) — a próxima leitura busca dado novo na hora.
 function invalidate(id) {
@@ -96,6 +103,7 @@ export const wpCache = {
   peekActivities,
   loadWorkPackage,
   loadActivities,
+  primeWorkPackage,
   invalidate,
   prefetchParents,
 };

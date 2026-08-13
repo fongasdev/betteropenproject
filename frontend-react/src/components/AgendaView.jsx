@@ -53,13 +53,14 @@ function buildMonthDays(anchor) {
   return days;
 }
 
-export default function AgendaView({ workPackages }) {
+export default function AgendaView({ workPackages, statuses, notify, openProjectUrl, onChangeStatus, onAddComment }) {
   const [anchor, setAnchor] = useState(() => new Date());
   const [viewMode, setViewMode] = useState("week"); // "week" | "month"
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pickerDate, setPickerDate] = useState(null);
+  const [expandedEntryId, setExpandedEntryId] = useState(null);
 
   const weekDays = useMemo(() => buildWeekDays(anchor), [anchor]);
   const monthDays = useMemo(() => buildMonthDays(anchor), [anchor]);
@@ -267,6 +268,17 @@ export default function AgendaView({ workPackages }) {
                     <div className="agenda-entry-title">
                       #{e.wp_id} — {e.wp_subject}
                       {overdue && <span className="agenda-entry-overdue-badge">atrasada</span>}
+                      {wp && (
+                        <button
+                          className="icon-btn agenda-entry-quick-toggle"
+                          onClick={() =>
+                            setExpandedEntryId((cur) => (cur === e.id ? null : e.id))
+                          }
+                          title="Alterar status / comentar sem sair da agenda"
+                        >
+                          {expandedEntryId === e.id ? "▴" : "⋯"}
+                        </button>
+                      )}
                     </div>
                     {wp && (
                       <div className="agenda-entry-meta">
@@ -279,7 +291,17 @@ export default function AgendaView({ workPackages }) {
                             {wp.priority}
                           </span>
                         )}
+                        <span className="agenda-entry-status">{wp.status}</span>
                       </div>
+                    )}
+                    {wp && expandedEntryId === e.id && (
+                      <AgendaEntryQuickActions
+                        wp={wp}
+                        statuses={statuses}
+                        notify={notify}
+                        onChangeStatus={onChangeStatus}
+                        onAddComment={onAddComment}
+                      />
                     )}
                     <DurationSlider
                       value={e.estimated_hours}
@@ -404,6 +426,76 @@ function DurationSlider({ value, onCommit }) {
         <span className="duration-slider-value">{local.hours}h</span>
       </div>
       <div className="duration-slider-total">{formatDuration(local)} no total</div>
+    </div>
+  );
+}
+
+// Ações rápidas de uma tarefa agendada, direto na Agenda — troca de status e
+// comentário, sem precisar abrir o Board/modal completo. O backend
+// (move_work_package_status) já resolve os hops intermediários do workflow
+// sozinho, então o select oferece todos os status conhecidos.
+function AgendaEntryQuickActions({ wp, statuses, notify, onChangeStatus, onAddComment }) {
+  const [changingStatus, setChangingStatus] = useState(false);
+  const [comment, setComment] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+
+  async function handleStatusSelect(ev) {
+    const statusId = parseInt(ev.target.value, 10);
+    const target = (statuses || []).find((s) => s.id === statusId);
+    if (!target || !onChangeStatus) return;
+    setChangingStatus(true);
+    try {
+      await onChangeStatus(wp, target);
+    } finally {
+      setChangingStatus(false);
+    }
+  }
+
+  async function handleSubmitComment() {
+    const text = comment.trim();
+    if (!text || !onAddComment) return;
+    setPostingComment(true);
+    try {
+      await onAddComment(wp.id, text);
+      setComment("");
+    } catch (e) {
+      notify?.(e.message || "Falha ao comentar", "error");
+    } finally {
+      setPostingComment(false);
+    }
+  }
+
+  return (
+    <div className="agenda-entry-quick-actions">
+      <div className="field">
+        <label>Status</label>
+        <select value="" onChange={handleStatusSelect} disabled={changingStatus}>
+          <option value="" disabled>
+            {changingStatus ? "Alterando..." : `atual: ${wp.status}`}
+          </option>
+          {(statuses || []).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="field">
+        <label>Comentário rápido</label>
+        <textarea
+          value={comment}
+          onChange={(ev) => setComment(ev.target.value)}
+          placeholder="Escreva um comentário..."
+          rows={2}
+        />
+      </div>
+      <button
+        className="icon-btn"
+        onClick={handleSubmitComment}
+        disabled={postingComment || !comment.trim()}
+      >
+        {postingComment ? "Enviando..." : "Comentar"}
+      </button>
     </div>
   );
 }

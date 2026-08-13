@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Board from "./components/Board.jsx";
-import WorkPackageModal from "./components/WorkPackageModal.jsx";
+import TaskTabPanel from "./components/TaskTabPanel.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 import PaletteSwitcher from "./components/PaletteSwitcher.jsx";
 import Toaster from "./components/Toaster.jsx";
@@ -8,6 +8,7 @@ import NotificationCenter from "./components/NotificationCenter.jsx";
 import ProjectFilter from "./components/ProjectFilter.jsx";
 import StatusFilter from "./components/StatusFilter.jsx";
 import TypeFilter from "./components/TypeFilter.jsx";
+import PriorityFilter from "./components/PriorityFilter.jsx";
 import ConfigVisibilityMenu, { loadVisibleConfigs } from "./components/ConfigVisibilityMenu.jsx";
 import AgendaView from "./components/AgendaView.jsx";
 import QuickSearch from "./components/QuickSearch.jsx";
@@ -93,6 +94,15 @@ function loadSelectedTypes() {
   }
 }
 
+function loadSelectedPriorities() {
+  try {
+    const raw = localStorage.getItem("op-selected-priorities");
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
 function loadLayout() {
   const v = localStorage.getItem("op-layout");
   return v === "vertical" ? "vertical" : "horizontal";
@@ -111,14 +121,16 @@ function loadCollapsedColumns() {
   }
 }
 
-export default function App() {
+export default function App({ onLogout }) {
   const [me, setMe] = useState(null);
   const [statuses, setStatuses] = useState([]);
   const [workPackages, setWorkPackages] = useState([]);
   const [onlyMe, setOnlyMe] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [openWp, setOpenWp] = useState(null);
-  const [openWpStack, setOpenWpStack] = useState([]);
+  // Abas de tarefa abertas — cada uma guarda só o essencial pra render do
+  // rótulo (id/subject); o conteúdo completo é buscado via wpCache (cache
+  // stale-while-revalidate) quando a aba fica ativa, igual o modal já fazia.
+  const [taskTabs, setTaskTabs] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [selectedProjects, setSelectedProjects] = useState(loadSelectedProjects);
   const [soundOn, setSoundOn] = useState(() => localStorage.getItem("op-sound") !== "off");
@@ -126,6 +138,7 @@ export default function App() {
   const [collapsedIds, setCollapsedIds] = useState(loadCollapsedCards);
   const [selectedStatuses, setSelectedStatuses] = useState(loadSelectedStatuses);
   const [selectedTypes, setSelectedTypes] = useState(loadSelectedTypes);
+  const [selectedPriorities, setSelectedPriorities] = useState(loadSelectedPriorities);
   const [layout, setLayout] = useState(loadLayout);
   const [resetToken, setResetToken] = useState(null);
   const [notifications, setNotifications] = useState(loadNotifications);
@@ -133,7 +146,9 @@ export default function App() {
   const [visibleConfigs, setVisibleConfigs] = useState(loadVisibleConfigs);
   const [collapsedColumns, setCollapsedColumns] = useState(loadCollapsedColumns);
   const [hideEmptyColumns, setHideEmptyColumns] = useState(loadHideEmptyColumns);
-  const [activeView, setActiveView] = useState("board");
+  // "board" | "agenda" | <wpId numérico> — aba ativa. Board e Agenda são
+  // fixas; tasks abertas viram abas próprias e fecháveis.
+  const [activeTab, setActiveTab] = useState("board");
 
   useEffect(() => {
     api.config().then((c) => setOpenProjectUrl(c.openProjectUrl)).catch(() => {});
@@ -217,6 +232,10 @@ export default function App() {
   }, [selectedTypes]);
 
   useEffect(() => {
+    localStorage.setItem("op-selected-priorities", JSON.stringify([...selectedPriorities]));
+  }, [selectedPriorities]);
+
+  useEffect(() => {
     localStorage.setItem("op-layout", layout);
   }, [layout]);
 
@@ -262,6 +281,15 @@ export default function App() {
     notify("Notificação de teste disparada", "info");
   }
 
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } catch (e) {
+      /* mesmo se falhar, derruba a sessão local — cookie expira sozinho */
+    }
+    onLogout?.();
+  }
+
   const projectNames = useMemo(() => {
     const set = new Set(workPackages.map((w) => w.project).filter(Boolean));
     return [...set].sort((a, b) => a.localeCompare(b));
@@ -278,13 +306,26 @@ export default function App() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [workPackages]);
 
+  const priorityNames = useMemo(() => {
+    const set = new Set(workPackages.map((w) => w.priority).filter(Boolean));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [workPackages]);
+
   const visibleWorkPackages = useMemo(() => {
     return workPackages.filter((w) => {
       if (selectedProjects.size > 0 && !selectedProjects.has(w.project)) return false;
       if (selectedTypes.size > 0 && !selectedTypes.has(w.type)) return false;
+      if (selectedPriorities.size > 0 && !selectedPriorities.has(w.priority)) return false;
       return true;
     });
-  }, [workPackages, selectedProjects, selectedTypes]);
+  }, [workPackages, selectedProjects, selectedTypes, selectedPriorities]);
+
+  // Agenda não usa os filtros de projeto/tipo do Board (botões não aparecem
+  // nessa view), só o de prioridade — que faz sentido em qualquer listagem.
+  const agendaWorkPackages = useMemo(() => {
+    if (selectedPriorities.size === 0) return workPackages;
+    return workPackages.filter((w) => selectedPriorities.has(w.priority));
+  }, [workPackages, selectedPriorities]);
 
 
   // Watcher: roda a cada 60s observando TODAS as minhas tarefas (independente
@@ -392,6 +433,14 @@ export default function App() {
     }
   }
 
+  // Comentário rápido a partir de fora do modal (ex.: Agenda) — mesma
+  // chamada que o modal usa, só sem o estado local de textarea dele.
+  async function handleAddComment(wpId, text) {
+    await api.addComment(wpId, text);
+    wpCache.invalidate(wpId);
+    notify(`Comentário adicionado em #${wpId}`, "success");
+  }
+
   // Redefine visualização: volta colunas pra ordem padrão de status (nova,
   // backlog, backlog pronto...) e expande todos os cards recolhidos.
   function handleResetView() {
@@ -401,55 +450,63 @@ export default function App() {
     notify("Visualização redefinida para o padrão", "info");
   }
 
+  // Abre (ou ativa, se já aberta) uma task na própria aba, com visão
+  // expandida. `openedFrom` é a aba de onde a abertura partiu (board/agenda/
+  // outra task) — usado só pelo botão "← Voltar" dentro da task.
+  const openTaskTab = useCallback((wp, openedFrom) => {
+    if (wp) wpCache.primeWorkPackage(wp);
+    setTaskTabs((tabs) => {
+      if (tabs.some((t) => t.id === wp.id)) return tabs;
+      return [...tabs, { id: wp.id, subject: wp.subject, openedFrom: openedFrom ?? activeTab }];
+    });
+    setActiveTab(wp.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  function closeTaskTab(wpId) {
+    setTaskTabs((tabs) => {
+      const idx = tabs.findIndex((t) => t.id === wpId);
+      if (idx === -1) return tabs;
+      const closedTab = tabs[idx];
+      const next = tabs.filter((t) => t.id !== wpId);
+      setActiveTab((cur) => (cur === wpId ? closedTab.openedFrom ?? "board" : cur));
+      return next;
+    });
+  }
+
   function handleOpenFromNotification(wpId) {
     const wp = workPackages.find((w) => w.id === wpId);
-    if (wp) {
-      setOpenWpStack([]);
-      setOpenWp(wp);
-    }
+    if (wp) openTaskTab(wp);
   }
 
   function handleDatesSaved(wpId, patch) {
     setWorkPackages((list) => list.map((w) => (w.id === wpId ? { ...w, ...patch } : w)));
-    setOpenWp((cur) => (cur && cur.id === wpId ? { ...cur, ...patch } : cur));
   }
 
-  // Abre a task relacionada (ex.: história vinculada a uma tarefa) empilhando
-  // a atual, pra dar pra voltar. Busca avulsa porque a relacionada pode não
-  // estar na lista carregada (ex.: não atribuída a mim, filtro "só as minhas").
+  // Abre a task relacionada (ex.: história vinculada a uma tarefa) numa nova
+  // aba, lembrando de onde veio pra dar pra voltar. Busca avulsa porque a
+  // relacionada pode não estar na lista carregada (ex.: filtro "só as minhas").
   async function handleOpenRelated(wpId) {
     try {
       const fromList = workPackages.find((w) => w.id === wpId);
       const related = fromList || (await wpCache.loadWorkPackage(wpId));
-      setOpenWpStack((stack) => [...stack, openWp]);
-      setOpenWp(related);
+      openTaskTab(related, activeTab);
     } catch (e) {
       notify(e.message || "Falha ao abrir task relacionada", "error");
     }
   }
 
-  function handleBackWp() {
-    setOpenWpStack((stack) => {
-      if (stack.length === 0) return stack;
-      const prev = stack[stack.length - 1];
-      setOpenWp(prev);
-      return stack.slice(0, -1);
-    });
-  }
-
-  function handleCloseWp() {
-    setOpenWp(null);
-    setOpenWpStack([]);
-  }
-
   function handleOpenFromSearch(wp) {
-    setOpenWpStack([]);
-    setOpenWp(wp);
+    openTaskTab(wp);
   }
 
   return (
     <div className="app">
-      <QuickSearch workPackages={workPackages} onOpenWp={handleOpenFromSearch} disabled={!!openWp} />
+      <QuickSearch
+        workPackages={workPackages}
+        onOpenWp={handleOpenFromSearch}
+        disabled={typeof activeTab === "number"}
+      />
 
       <header className="topbar">
         <div className="topbar-brand" aria-label="SmartFlow">
@@ -459,21 +516,21 @@ export default function App() {
 
         <div className="view-tabs">
           <button
-            className={`view-tab${activeView === "board" ? " active" : ""}`}
-            onClick={() => setActiveView("board")}
+            className={`view-tab${activeTab === "board" ? " active" : ""}`}
+            onClick={() => setActiveTab("board")}
           >
-            Board
+            Dashboard
           </button>
           <button
-            className={`view-tab${activeView === "agenda" ? " active" : ""}`}
-            onClick={() => setActiveView("agenda")}
+            className={`view-tab${activeTab === "agenda" ? " active" : ""}`}
+            onClick={() => setActiveTab("agenda")}
           >
             Agenda
           </button>
         </div>
 
         <div className="topbar-right">
-          {activeView === "board" && visibleConfigs.has("projectFilter") && (
+          {activeTab === "board" && visibleConfigs.has("projectFilter") && (
             <ProjectFilter
               projects={projectNames}
               selected={selectedProjects}
@@ -481,7 +538,7 @@ export default function App() {
             />
           )}
 
-          {activeView === "board" && visibleConfigs.has("statusFilter") && (
+          {activeTab === "board" && visibleConfigs.has("statusFilter") && (
             <StatusFilter
               statuses={statusNames}
               selected={selectedStatuses}
@@ -489,11 +546,19 @@ export default function App() {
             />
           )}
 
-          {activeView === "board" && visibleConfigs.has("typeFilter") && (
+          {activeTab === "board" && visibleConfigs.has("typeFilter") && (
             <TypeFilter types={typeNames} selected={selectedTypes} onChange={setSelectedTypes} />
           )}
 
-          {activeView === "board" && visibleConfigs.has("layoutToggle") && (
+          {visibleConfigs.has("priorityFilter") && (
+            <PriorityFilter
+              priorities={priorityNames}
+              selected={selectedPriorities}
+              onChange={setSelectedPriorities}
+            />
+          )}
+
+          {activeTab === "board" && visibleConfigs.has("layoutToggle") && (
             <button
               className="icon-btn"
               onClick={() => setLayout((v) => (v === "horizontal" ? "vertical" : "horizontal"))}
@@ -503,7 +568,7 @@ export default function App() {
             </button>
           )}
 
-          {activeView === "board" && visibleConfigs.has("resetView") && (
+          {activeTab === "board" && visibleConfigs.has("resetView") && (
             <button
               className="icon-btn"
               onClick={handleResetView}
@@ -513,7 +578,7 @@ export default function App() {
             </button>
           )}
 
-          {activeView === "board" && visibleConfigs.has("hideEmptyColumns") && (
+          {activeTab === "board" && visibleConfigs.has("hideEmptyColumns") && (
             <label className="switch-label">
               ocultar colunas vazias
               <span
@@ -583,12 +648,68 @@ export default function App() {
             </div>
           )}
 
+          <button className="icon-btn" onClick={handleLogout} title="Sair (encerra a sessão)">
+            Sair
+          </button>
+
           <ConfigVisibilityMenu visible={visibleConfigs} onChange={setVisibleConfigs} />
         </div>
       </header>
 
-      {activeView === "agenda" ? (
-        <AgendaView workPackages={workPackages} />
+      {taskTabs.length > 0 && (
+        <div className="task-tab-bar">
+          {taskTabs.map((t) => (
+            <button
+              key={t.id}
+              className={`task-chrome-tab${activeTab === t.id ? " active" : ""}`}
+              onClick={() => setActiveTab(t.id)}
+              title={t.subject}
+            >
+              <span className="task-chrome-tab-label">
+                #{t.id} — {t.subject?.length > 22 ? `${t.subject.slice(0, 22)}…` : t.subject}
+              </span>
+              <span
+                className="task-tab-close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  closeTaskTab(t.id);
+                }}
+                title="Fechar aba"
+              >
+                ✕
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {typeof activeTab === "number" ? (
+        (() => {
+          const tab = taskTabs.find((t) => t.id === activeTab);
+          if (!tab) return null;
+          return (
+            <TaskTabPanel
+              wpId={tab.id}
+              subjectHint={tab.subject}
+              onClose={() => closeTaskTab(tab.id)}
+              onDatesSaved={handleDatesSaved}
+              notify={notify}
+              openProjectUrl={openProjectUrl}
+              onOpenRelated={handleOpenRelated}
+              canGoBack={!!tab.openedFrom}
+              onBack={() => setActiveTab(tab.openedFrom ?? "board")}
+            />
+          );
+        })()
+      ) : activeTab === "agenda" ? (
+        <AgendaView
+          workPackages={agendaWorkPackages}
+          statuses={statuses}
+          notify={notify}
+          openProjectUrl={openProjectUrl}
+          onChangeStatus={handleMove}
+          onAddComment={handleAddComment}
+        />
       ) : loading && workPackages.length === 0 ? (
         <div className="loading-wrap">
           <span className="spinner" />
@@ -598,7 +719,7 @@ export default function App() {
         <Board
           statuses={statuses}
           workPackages={visibleWorkPackages}
-          onOpenCard={(wp) => { setOpenWpStack([]); setOpenWp(wp); }}
+          onOpenCard={(wp) => openTaskTab(wp)}
           onMove={handleMove}
           pingedIds={pingedIds}
           collapsedIds={collapsedIds}
@@ -609,19 +730,6 @@ export default function App() {
           hideEmptyColumns={hideEmptyColumns}
           layout={layout}
           resetToken={resetToken}
-        />
-      )}
-
-      {openWp && (
-        <WorkPackageModal
-          wp={openWp}
-          onClose={handleCloseWp}
-          onDatesSaved={handleDatesSaved}
-          notify={notify}
-          openProjectUrl={openProjectUrl}
-          onOpenRelated={handleOpenRelated}
-          canGoBack={openWpStack.length > 0}
-          onBack={handleBackWp}
         />
       )}
 

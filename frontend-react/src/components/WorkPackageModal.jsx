@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { api } from "../api.js";
 import { wpCache } from "../wpCache.js";
+import { sanitizeRichHtml } from "../richContent.js";
 
 export default function WorkPackageModal({
   wp,
@@ -12,6 +13,7 @@ export default function WorkPackageModal({
   onOpenRelated,
   canGoBack,
   onBack,
+  embedded = false,
 }) {
   const [startDate, setStartDate] = useState(wp.startDate || "");
   const [dueDate, setDueDate] = useState(wp.dueDate || "");
@@ -182,29 +184,9 @@ export default function WorkPackageModal({
     }
   }
 
-  return (
-    <AnimatePresence>
-      <motion.div
-        className="modal-backdrop"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={(e) => e.target === e.currentTarget && onClose()}
-      >
-        <div className="modal-shell">
-          {canGoBack && (
-            <button className="modal-back" onClick={onBack} title="Voltar para a task anterior">
-              ← Voltar
-            </button>
-          )}
-          <motion.div
-            className="modal"
-            initial={{ opacity: 0, scale: 0.94, y: 16 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ type: "spring", stiffness: 420, damping: 32 }}
-          >
-          <button className="modal-close" onClick={onClose}>
+  const panelBody = (
+    <>
+          <button className="modal-close" onClick={onClose} title={embedded ? "Fechar aba" : "Fechar"}>
             ✕
           </button>
           <div className="modal-actions-row">
@@ -334,9 +316,51 @@ export default function WorkPackageModal({
                   {a.createdAt ? new Date(a.createdAt).toLocaleString("pt-BR") : ""}
                 </span>
               </div>
-              <div className="activity-body">{a.comment}</div>
+              <div
+                className="activity-body"
+                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(a.comment) }}
+              />
             </div>
           ))}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="tab-task-panel">
+        {canGoBack && (
+          <button className="modal-back" onClick={onBack} title="Voltar para a task anterior">
+            ← Voltar
+          </button>
+        )}
+        <div className="modal embedded-modal">{panelBody}</div>
+      </div>
+    );
+  }
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="modal-backdrop"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={(e) => e.target === e.currentTarget && onClose()}
+      >
+        <div className="modal-shell">
+          {canGoBack && (
+            <button className="modal-back" onClick={onBack} title="Voltar para a task anterior">
+              ← Voltar
+            </button>
+          )}
+          <motion.div
+            className="modal"
+            initial={{ opacity: 0, scale: 0.94, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ type: "spring", stiffness: 420, damping: 32 }}
+          >
+            {panelBody}
           </motion.div>
         </div>
       </motion.div>

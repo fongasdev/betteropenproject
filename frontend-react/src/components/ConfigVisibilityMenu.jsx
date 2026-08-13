@@ -5,6 +5,7 @@ export const CONFIG_ITEMS = [
   { id: "projectFilter", label: "Filtro de projetos" },
   { id: "statusFilter", label: "Filtro de status" },
   { id: "typeFilter", label: "Filtro de tipo" },
+  { id: "priorityFilter", label: "Filtro de prioridade" },
   { id: "layoutToggle", label: "Alternar layout do board" },
   { id: "resetView", label: "Redefinir visualização" },
   { id: "onlyMe", label: "Só as minhas" },

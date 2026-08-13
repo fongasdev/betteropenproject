@@ -1083,6 +1083,43 @@ button {
   background: rgba(0, 0, 0, 0.5);
 }
 
+/* Task aberta em aba própria: mesmo conteúdo do modal, só que numa área
+   expandida (mais largura/altura), sem overlay/backdrop, ocupando a área da
+   aba ativa. */
+.tab-task-panel {
+  /* mesmo padrão do board/agenda: rola só o conteúdo da task, o resto
+     (header + barra de abas) fica sempre fixo/visível. */
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 18px 20px 40px;
+  box-sizing: border-box;
+}
+
+.tab-task-panel .modal-back {
+  position: static;
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+
+.tab-task-panel .modal-back:hover {
+  background: var(--card-hover);
+}
+
+.embedded-modal.modal {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  overflow-y: visible;
+  padding: 24px 28px;
+}
+
 .related-wp-section {
   margin-bottom: 18px;
 }
@@ -1156,6 +1193,8 @@ button {
 }
 
 .field input[type="date"],
+.field input[type="password"],
+.field input[type="text"],
 .field textarea {
   width: 100%;
   background: var(--bg);
@@ -1173,6 +1212,8 @@ button {
 }
 
 .field input[type="date"]:focus,
+.field input[type="password"]:focus,
+.field input[type="text"]:focus,
 .field textarea:focus {
   outline: none;
   border-color: var(--accent);
@@ -1213,6 +1254,60 @@ button {
   cursor: not-allowed;
 }
 
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 20px;
+}
+
+.login-card {
+  width: 380px;
+  max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 28px;
+  box-shadow: var(--shadow-lift);
+}
+
+.login-brand {
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.login-subtitle {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 4px;
+}
+
+.login-card .btn {
+  width: 100%;
+}
+
+.login-error {
+  color: var(--danger);
+  font-size: 12.5px;
+  margin-top: 12px;
+}
+
+.login-help-link {
+  display: block;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--accent);
+  text-align: center;
+  word-break: break-word;
+}
+
 .section-title {
   font-size: 12px;
   text-transform: uppercase;
@@ -1249,6 +1344,43 @@ button {
   color: var(--text);
   white-space: pre-wrap;
   line-height: 1.4;
+}
+
+.activity-body p {
+  margin: 0 0 8px;
+}
+
+.activity-body p:last-child {
+  margin-bottom: 0;
+}
+
+.activity-body ul,
+.activity-body ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.activity-body a {
+  color: var(--accent);
+}
+
+.mention-chip {
+  display: inline-block;
+  background: rgba(79, 109, 245, 0.15);
+  color: var(--accent);
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.activity-inline-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 8px;
+  margin: 8px 0;
+  object-fit: contain;
 }
 
 .empty-state {
@@ -1456,6 +1588,8 @@ button {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 3px;
+  max-width: 52vw;
+  overflow-x: auto;
 }
 
 .view-tab {
@@ -1466,11 +1600,82 @@ button {
   border-radius: 6px;
   cursor: pointer;
   font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .view-tab.active {
   background: var(--accent);
   color: #fff;
+}
+
+/* Barra de abas de tarefa — linha própria abaixo do header, estilo
+   "abas de navegador" (Chrome): topo arredondado, cresce da direita pra
+   esquerda conforme mais tasks são abertas. */
+.task-tab-bar {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 6px 20px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.task-chrome-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 7px 10px 7px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12.5px;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.task-chrome-tab:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.task-chrome-tab.active {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 500;
+  /* "cola" no conteúdo abaixo, como se a aba ativa fizesse parte dele */
+  box-shadow: 0 1px 0 0 var(--panel);
+  position: relative;
+  z-index: 1;
+}
+
+.task-chrome-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 10px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.task-tab-close:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .agenda-view {
@@ -1622,6 +1827,51 @@ button {
 .agenda-entry-title {
   font-size: 13px;
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agenda-entry-quick-toggle {
+  margin-left: auto;
+  padding: 0 6px;
+  line-height: 1;
+  font-size: 12px;
+}
+
+.agenda-entry-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.agenda-entry-quick-actions {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agenda-entry-quick-actions .field label {
+  font-size: 11px;
+}
+
+.agenda-entry-quick-actions select,
+.agenda-entry-quick-actions textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
 }
 
 .agenda-entry-controls {

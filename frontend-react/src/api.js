@@ -7,6 +7,11 @@ class ApiError extends Error {
   }
 }
 
+// Chamado quando qualquer request volta 401 (sessão inexistente/expirada) —
+// a AuthGate registra isso pra derrubar a tela de volta pro login sem
+// precisar que cada chamador da API trate o caso na mão.
+let unauthorizedHandler = null;
+
 async function handle(res) {
   if (!res.ok) {
     let message = `Erro ${res.status}`;
@@ -16,6 +21,7 @@ async function handle(res) {
     } catch (e) {
       /* ignore */
     }
+    if (res.status === 401) unauthorizedHandler?.();
     throw new ApiError(message, res.status);
   }
   if (res.status === 204) return null;
@@ -23,7 +29,20 @@ async function handle(res) {
 }
 
 export const api = {
+  setUnauthorizedHandler: (fn) => {
+    unauthorizedHandler = fn;
+  },
+
   config: () => fetch(`${BASE}/config`).then(handle),
+
+  login: (apiKey) =>
+    fetch(`${BASE}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+    }).then(handle),
+
+  logout: () => fetch(`${BASE}/logout`, { method: "POST" }).then(handle),
 
   me: () => fetch(`${BASE}/me`).then(handle),
 
